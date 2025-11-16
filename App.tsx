@@ -512,15 +512,14 @@ export default function App() {
 
     const fullDescription = data.rules ? `${data.description}\n\n**Rules:**\n${data.rules}` : data.description;
     
-    // Step 1: Insert the group. If it's meant to be private, create it as PUBLIC first.
-    // This is a workaround for RLS policies that might prevent adding members to private groups.
+    // Step 1: Insert the group. Create it as PUBLIC first to ensure we can add members before locking it down.
     const { data: newGroupData, error: insertError } = await supabase
         .from('habit_groups')
         .insert({
             name: data.name,
             description: fullDescription,
             emoji: categoryInfo.emoji,
-            is_private: false, // ALWAYS create as public first
+            is_private: false, // Create as public first
             cover_image_url: data.coverImageUrl,
             creator_id: currentUser.id
         })
@@ -535,17 +534,17 @@ export default function App() {
     
     const newGroupId = newGroupData.id;
 
-    // Step 2: Add the creator as a member. This can be done now because the group is public.
-    const { error: memberInsertError } = await supabase
+    // Step 2: Add the creator as a member. Use upsert to avoid race conditions with a potential database trigger.
+    const { error: memberUpsertError } = await supabase
         .from('habit_group_members')
-        .insert({
+        .upsert({
             group_id: newGroupId,
             user_id: currentUser.id
         });
         
-    if (memberInsertError) {
-        console.error("Error adding creator to members (step 2):", memberInsertError.message);
-        // Cleanup
+    if (memberUpsertError) {
+        console.error("Error upserting creator to members (step 2):", memberUpsertError.message);
+        // Cleanup if adding the member fails.
         await supabase.from('habit_groups').delete().eq('id', newGroupId);
         setIsAddHabitGroupModalOpen(false);
         return;
@@ -560,7 +559,7 @@ export default function App() {
         
         if (updateError) {
             console.error("Error updating group to private (step 3):", updateError.message);
-            // Cleanup
+            // Cleanup on failure
             await supabase.from('habit_group_members').delete().eq('group_id', newGroupId);
             await supabase.from('habit_groups').delete().eq('id', newGroupId);
             setIsAddHabitGroupModalOpen(false);
