@@ -1,5 +1,4 @@
-
-
+// App.tsx
 import React, { useState, useEffect, useCallback } from 'react';
 import Sidebar from './components/Header';
 import Feed from './components/Feed';
@@ -328,14 +327,16 @@ export default function App() {
         setHabitLogs([]);
     }
     
-    // Fetch habit groups
+    // Fetch habit groups: include public groups and private groups owned by currentUser
+    const groupsFilter = `is_private.eq.false,creator_id.eq.${currentUser.id}`;
     const { data: groupsData, error: groupsError } = await supabase
         .from('habit_groups')
-        .select('*, creator:profiles(*), members:habit_group_members(profiles(*))');
+        .select('*, creator:profiles(*), members:habit_group_members(profiles(*))')
+        .or(groupsFilter);
 
     if (groupsData) {
         const mappedGroups: HabitGroup[] = groupsData.map((g: any) => {
-             const members = g.members.map((m: any) => mapProfileToUser(m.profiles)).filter(Boolean) as User[];
+             const members = (g.members || []).map((m: any) => mapProfileToUser(m.profiles)).filter(Boolean) as User[];
              const creator = mapProfileToUser(g.creator) || DELETED_USER;
 
              const category = HABIT_CATEGORIES.find(cat => cat.emoji === g.emoji);
@@ -358,6 +359,12 @@ export default function App() {
              };
         });
         setHabitGroups(mappedGroups);
+    } else {
+        // If there's an error (maybe RLS), log it and clear habitGroups to avoid stale data
+        if (groupsError) {
+            console.error("Error fetching habit groups:", groupsError);
+            setHabitGroups([]);
+        }
     }
 
   }, [currentUser, language, calculateAndSetUserStats]);
@@ -512,71 +519,53 @@ export default function App() {
 
     const fullDescription = data.rules ? `${data.description}\n\n**Rules:**\n${data.rules}` : data.description;
     
-    // Step 1: Insert the group. We use the "create public then update" workaround for private groups
-    // to ensure the creator is correctly added as a member by the database trigger.
-    const { data: newGroupData, error: insertError } = await supabase
-        .from('habit_groups')
-        .insert({
-            name: data.name,
-            description: fullDescription,
-            emoji: categoryInfo.emoji,
-            is_private: false, // Create as public first
-            cover_image_url: data.coverImageUrl,
-            creator_id: currentUser.id
-        })
-        .select('*') // Select the full new row
-        .single();
-    
-    if (insertError || !newGroupData) {
-      console.error("Error adding habit group (step 1):", insertError?.message);
-      setIsAddHabitGroupModalOpen(false);
-      return;
-    }
-    
-    let finalGroupData = newGroupData;
-
-    // Step 2: If the group was intended to be private, update it immediately.
-    if (data.isPrivate) {
-        const { data: updatedGroup, error: updateError } = await supabase
+    try {
+        // Step 1: Always insert as public first. This is a workaround for the RLS policy
+        // on `habit_group_members` which blocks the `add_creator_to_group_members` trigger for private groups.
+        const { data: newGroupData, error: insertError } = await supabase
             .from('habit_groups')
-            .update({ is_private: true })
-            .eq('id', newGroupData.id)
-            .select('*') // Select the full updated row
+            .insert({
+                name: data.name,
+                description: fullDescription,
+                emoji: categoryInfo.emoji,
+                is_private: false, // Create as public first
+                cover_image_url: data.coverImageUrl,
+                creator_id: currentUser.id
+            })
+            .select('id')
             .single();
         
-        if (updateError || !updatedGroup) {
-            console.error("Error updating group to private (step 2):", updateError?.message);
-            // Attempt to clean up the partially created group
-            await supabase.from('habit_groups').delete().eq('id', newGroupData.id);
-            setIsAddHabitGroupModalOpen(false);
-            return;
+        if (insertError) {
+          console.error("Error adding habit group (step 1):", insertError.message);
+          setIsAddHabitGroupModalOpen(false);
+          return;
         }
-        finalGroupData = updatedGroup;
+        
+        // Step 2: If the group was intended to be private, update it immediately.
+        if (data.isPrivate) {
+            const { error: updateError } = await supabase
+                .from('habit_groups')
+                .update({ is_private: true })
+                .eq('id', newGroupData.id);
+            
+            if (updateError) {
+                console.error("Error updating group to private (step 2):", updateError.message);
+                // Attempt to clean up the partially created group
+                await supabase.from('habit_groups').delete().eq('id', newGroupData.id);
+                setIsAddHabitGroupModalOpen(false);
+                return;
+            }
+        }
+
+        // IMPORTANT: refresh data from server so structure matches what our UI expects
+        await fetchData();
+
+        setIsAddHabitGroupModalOpen(false);
+
+    } catch (err) {
+        console.error("Error adding habit group:", err);
+        setIsAddHabitGroupModalOpen(false);
     }
-
-    // Step 3: Construct the full UI object and update state optimistically.
-    // This is more reliable than refetching, as it avoids race conditions with database replication.
-    const category = HABIT_CATEGORIES.find(cat => cat.emoji === finalGroupData.emoji);
-    const tagName = category ? translations[language][category.translationKey] : 'General';
-
-    const newHabitGroupForUI: HabitGroup = {
-      id: finalGroupData.id,
-      name: finalGroupData.name,
-      emoji: finalGroupData.emoji,
-      description: finalGroupData.description,
-      isPrivate: finalGroupData.is_private,
-      coverImageUrl: finalGroupData.cover_image_url || undefined,
-      creator: currentUser, // We know the creator is the current user.
-      members: [currentUser], // By definition, the creator is the first member.
-      memberCount: 1,
-      tag: {
-        emoji: finalGroupData.emoji,
-        text: tagName,
-      },
-    };
-
-    setHabitGroups(prev => [...prev, newHabitGroupForUI]);
-    setIsAddHabitGroupModalOpen(false);
   };
 
   const handleAddPost = (habitGroupId: string, note: string, imageUrl?: string) => {
