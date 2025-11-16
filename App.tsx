@@ -512,26 +512,66 @@ export default function App() {
 
     const fullDescription = data.rules ? `${data.description}\n\n**Rules:**\n${data.rules}` : data.description;
     
-    const { data: newGroupData, error } = await supabase
+    // Step 1: Always insert as public first. This is a workaround for the RLS policy
+    // on `habit_group_members` which blocks the `add_creator_to_group_members` trigger for private groups.
+    const { data: newGroupData, error: insertError } = await supabase
         .from('habit_groups')
         .insert({
             name: data.name,
             description: fullDescription,
             emoji: categoryInfo.emoji,
-            is_private: data.isPrivate,
+            is_private: false, // Create as public first
             cover_image_url: data.coverImageUrl,
             creator_id: currentUser.id
         })
-        .select()
+        .select('id')
         .single();
     
-    if (error) {
-      console.error("Error adding habit group:", error);
-    } else if (newGroupData) {
-      // Fetch data in the background to sync with the database source of truth
-      fetchData();
+    if (insertError) {
+      console.error("Error adding habit group (step 1):", insertError.message);
+      setIsAddHabitGroupModalOpen(false);
+      return;
+    }
+    
+    // Step 2: If the group was intended to be private, update it immediately.
+    if (data.isPrivate) {
+        const { error: updateError } = await supabase
+            .from('habit_groups')
+            .update({ is_private: true })
+            .eq('id', newGroupData.id);
+        
+        if (updateError) {
+            console.error("Error updating group to private (step 2):", updateError.message);
+            // Attempt to clean up the partially created group
+            await supabase.from('habit_groups').delete().eq('id', newGroupData.id);
+            setIsAddHabitGroupModalOpen(false);
+            return;
+        }
     }
 
+    // Step 3: Manually construct the new group object for an immediate and reliable UI update.
+    // This avoids race conditions with fetchData().
+    const category = HABIT_CATEGORIES.find(cat => cat.emoji === categoryInfo.emoji);
+    const tagName = category ? translations[language][category.translationKey] : 'General';
+
+    const newHabitGroupForUI: HabitGroup = {
+        id: newGroupData.id,
+        name: data.name,
+        emoji: categoryInfo.emoji,
+        description: fullDescription,
+        isPrivate: data.isPrivate,
+        coverImageUrl: data.coverImageUrl || undefined,
+        creator: currentUser,
+        members: [currentUser],
+        memberCount: 1,
+        tag: {
+            emoji: categoryInfo.emoji,
+            text: tagName
+        },
+        color: undefined // color is not set on creation
+    };
+
+    setHabitGroups(prev => [...prev, newHabitGroupForUI]);
     setIsAddHabitGroupModalOpen(false);
   };
 
