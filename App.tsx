@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useCallback } from 'react';
 import Sidebar from './components/Header';
 import Feed from './components/Feed';
@@ -413,8 +414,23 @@ export default function App() {
         .single();
     
     if (newGroupData) {
-        // Instead of manually constructing, we refetch to get all relational data correctly
-        fetchData();
+        const tagName = categoryInfo ? translations[language][categoryInfo.translationKey] : 'General';
+        const newHabitGroup: HabitGroup = {
+            id: newGroupData.id,
+            name: newGroupData.name,
+            emoji: newGroupData.emoji,
+            description: newGroupData.description,
+            isPrivate: newGroupData.is_private,
+            coverImageUrl: newGroupData.cover_image_url,
+            creator: currentUser,
+            members: [currentUser],
+            memberCount: 1,
+            tag: {
+                emoji: newGroupData.emoji,
+                text: tagName,
+            },
+        };
+        setHabitGroups(prev => [...prev, newHabitGroup]);
     }
     if (error) console.error("Error adding habit group:", error);
 
