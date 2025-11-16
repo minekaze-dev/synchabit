@@ -102,7 +102,7 @@ export interface Conversation {
 export interface HabitLog {
     id: string;
     habitId: string;
-    date: string; // YYYY-MM-DD string
+    date: number; // day of the month
     note: string;
 }
 

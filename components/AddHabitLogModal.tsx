@@ -7,7 +7,7 @@ interface AddHabitLogModalProps {
   onClose: () => void;
   onAddLog: (note: string) => void;
   habit: Habit;
-  date: Date;
+  date: number;
   t: any;
 }
 
@@ -32,7 +32,7 @@ export default function AddHabitLogModal({ isOpen, onClose, onAddLog, habit, dat
             <span className="text-4xl">{habit.icon}</span>
             <div>
               <h2 className="text-xl font-bold text-slate-800">{t.addHabitNote}</h2>
-              <p className="text-slate-600 font-semibold">{habit.name} - {date.toLocaleDateString('default', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+              <p className="text-slate-600 font-semibold">{habit.name} - November {date}</p>
             </div>
           </div>
           

@@ -1,9 +1,9 @@
-
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Header';
 import Feed from './components/Feed';
 import Profile from './components/Dashboard';
-import { Post, Habit, User, HabitGroup, HabitLog, Conversation, Notification, Comment } from './types';
+import { Post, Habit, User, Badge, Challenge, HabitGroup, HabitLog, Conversation, Notification, Comment } from './types';
+import { INITIAL_POSTS, INITIAL_HABITS, CURRENT_USER as INITIAL_CURRENT_USER, BADGES, CHALLENGES, HABIT_GROUPS, HABIT_LOGS, CONVERSATIONS, INITIAL_NOTIFICATIONS, DUMMY_USER } from './constants';
 import AddHabitModal from './components/AddHabitModal';
 import { translations, Language } from './translations';
 import Settings from './components/Settings';
@@ -18,10 +18,6 @@ import NotificationDropdown from './components/NotificationDropdown';
 import HabitGroupManagementModal from './components/HabitGroupManagementModal';
 import LandingPage from './components/LandingPage';
 import AuthModal from './components/AuthModal';
-import { supabase } from './supabaseClient';
-import { Session } from '@supabase/supabase-js';
-import ConfirmationModal from './components/ConfirmationModal';
-import { HABIT_CATEGORIES } from './constants';
 
 export type View = 'feed' | 'profile' | 'settings' | 'messages';
 export type Theme = 'light' | 'dark';
@@ -35,18 +31,6 @@ type AuthModalState = {
   isOpen: boolean;
   mode: 'login' | 'register' | 'forgot';
 }
-
-// Helper to map Supabase user profile to our User type
-const mapProfileToUser = (profile: any): User | null => {
-    if (!profile) return null;
-    return {
-        id: profile.id,
-        name: profile.name,
-        avatarUrl: profile.avatar_url,
-        bio: profile.bio,
-        memberSince: new Date(profile.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
-    };
-};
 
 const TopBar: React.FC<{ 
   user: User, 
@@ -114,17 +98,15 @@ const TopBar: React.FC<{
 
 
 export default function App() {
-  const [session, setSession] = useState<Session | null>(null);
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<User>(INITIAL_CURRENT_USER);
   const [currentView, setView] = useState<View>('feed');
-  const [posts, setPosts] = useState<Post[]>([]);
-  const [habits, setHabits] = useState<Habit[]>([]);
-  const [habitLogs, setHabitLogs] = useState<HabitLog[]>([]);
-  const [habitGroups, setHabitGroups] = useState<HabitGroup[]>([]);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [posts, setPosts] = useState<Post[]>(INITIAL_POSTS);
+  const [habits, setHabits] = useState<Habit[]>(INITIAL_HABITS);
+  const [habitLogs, setHabitLogs] = useState<HabitLog[]>(HABIT_LOGS);
+  const [habitGroups, setHabitGroups] = useState<HabitGroup[]>(HABIT_GROUPS);
+  const [conversations, setConversations] = useState<Conversation[]>(CONVERSATIONS);
+  const [notifications, setNotifications] = useState<Notification[]>(INITIAL_NOTIFICATIONS);
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   
   const [selectedHabitGroupId, setSelectedHabitGroupId] = useState<string | null>(null);
@@ -139,7 +121,7 @@ export default function App() {
   const [selectedHabitLog, setSelectedHabitLog] = useState<HabitLog | null>(null);
 
   const [isAddHabitLogModalOpen, setIsAddHabitLogModalOpen] = useState(false);
-  const [habitLogContext, setHabitLogContext] = useState<{ habitId: string; date: Date } | null>(null);
+  const [habitLogContext, setHabitLogContext] = useState<{ habitId: string; date: number } | null>(null);
   
   const [language, setLanguage] = useState<Language>('id');
   const [searchQuery, setSearchQuery] = useState('');
@@ -150,16 +132,7 @@ export default function App() {
   const [newHabitGroupIds, setNewHabitGroupIds] = useState<string[]>([]);
 
   const [authModal, setAuthModal] = useState<AuthModalState>({ isOpen: false, mode: 'login' });
-  const [showConfirmationModal, setShowConfirmationModal] = useState(false);
   
-  const [userStats, setUserStats] = useState({ 
-    checkinConsistency: 0, 
-    maxStreak: 0,
-    totalConsistentDays: 0,
-    totalCheers: 0,
-    totalPushes: 0
-  });
-
   const [theme, setTheme] = useState<Theme>(() => {
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme) {
@@ -177,269 +150,39 @@ export default function App() {
     }
     localStorage.setItem('theme', theme);
   }, [theme]);
-  
-  // Auth listener
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setLoading(false)
-    })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-        setSession(session);
-        if (!session) {
-            setCurrentUser(null);
-            // Clear all data
-            setPosts([]);
-            setHabits([]);
-            setHabitLogs([]);
-            setHabitGroups([]);
-            setUserStats({ checkinConsistency: 0, maxStreak: 0, totalConsistentDays: 0, totalCheers: 0, totalPushes: 0 });
-        }
-        setLoading(false);
+  const [hasUnreadMessages, setHasUnreadMessages] = useState(() => {
+    return CONVERSATIONS.some(conv => {
+        if (conv.messages.length === 0) return false;
+        const lastMessage = conv.messages[conv.messages.length - 1];
+        return lastMessage.senderId !== INITIAL_CURRENT_USER.id;
     });
-
-    return () => subscription.unsubscribe();
-  }, []);
-  
-  const calculateAndSetUserStats = useCallback((habitsWithLogs: any[], userInteractions: {cheers: number, pushes: number}) => {
-      // 1. Calculate Check-in Consistency for the last 30 days
-      const allLogs = habitsWithLogs.flatMap(h => h.habit_logs || []);
-      let consistency = 0;
-      if (allLogs.length > 0) {
-          const thirtyDaysAgo = new Date();
-          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-          
-          const uniqueDaysInLast30 = new Set(
-              allLogs
-                  .map(log => new Date(log.date))
-                  .filter(date => date >= thirtyDaysAgo)
-                  .map(date => date.toISOString().split('T')[0])
-          ).size;
-          consistency = Math.round((uniqueDaysInLast30 / 30) * 100);
-      }
-
-      // 2. Calculate Max Streak
-      let maxStreak = 0;
-      for (const habit of habitsWithLogs) {
-          const logs = habit.habit_logs || [];
-          if (logs.length === 0) continue;
-
-          const logDates = new Set(logs.map((log: any) => log.date));
-          let currentStreak = 0;
-          
-          const sortedDates = Array.from(logDates).sort((a, b) => new Date(b as string).getTime() - new Date(a as string).getTime());
-          
-          const today = new Date();
-          today.setHours(0,0,0,0);
-          const yesterday = new Date(today);
-          yesterday.setDate(yesterday.getDate() - 1);
-
-          const latestLogDate = new Date(sortedDates[0] as string);
-          latestLogDate.setHours(0,0,0,0);
-          
-          if (latestLogDate.getTime() === today.getTime() || latestLogDate.getTime() === yesterday.getTime()) {
-              currentStreak = 1;
-              let lastDate = latestLogDate;
-              for (let i = 1; i < sortedDates.length; i++) {
-                  const currentDate = new Date(sortedDates[i] as string);
-                  currentDate.setHours(0,0,0,0);
-                  const expectedPreviousDate = new Date(lastDate);
-                  expectedPreviousDate.setDate(expectedPreviousDate.getDate() - 1);
-                  
-                  if (currentDate.getTime() === expectedPreviousDate.getTime()) {
-                      currentStreak++;
-                      lastDate = currentDate;
-                  } else {
-                      break;
-                  }
-              }
-          }
-          if (currentStreak > maxStreak) {
-              maxStreak = currentStreak;
-          }
-      }
-      
-      // 3. Calculate Total Consistent Days
-      const totalConsistentDays = new Set(allLogs.map(log => log.date)).size;
-
-      setUserStats({ 
-        checkinConsistency: consistency, 
-        maxStreak,
-        totalConsistentDays: totalConsistentDays,
-        totalCheers: userInteractions.cheers,
-        totalPushes: userInteractions.pushes
-      });
-  }, []);
-
-  const fetchData = useCallback(async () => {
-    if (!currentUser) return;
-
-    // Fetch personal habits with their logs
-    const { data: habitsData, error: habitsError } = await supabase
-        .from('habits')
-        .select('*, habit_logs(*)')
-        .eq('user_id', currentUser.id);
-
-    let userInteractions = { cheers: 0, pushes: 0 };
-    // Fetch user's posts to calculate interactions received
-    const { data: userPosts, error: postsError } = await supabase
-        .from('posts')
-        .select('id')
-        .eq('user_id', currentUser.id);
-
-    if (userPosts && userPosts.length > 0) {
-        const postIds = userPosts.map(p => p.id);
-        const { data: interactions, error: interactionsError } = await supabase
-            .from('post_interactions')
-            .select('type')
-            .in('post_id', postIds);
-        
-        if (interactions) {
-            userInteractions.cheers = interactions.filter(i => i.type === 'support').length;
-            userInteractions.pushes = interactions.filter(i => i.type === 'push').length;
-        }
-    }
-    
-
-    if (habitsData) {
-        calculateAndSetUserStats(habitsData, userInteractions);
-        const mappedHabits: Habit[] = habitsData.map((h: any) => ({
-            id: h.id,
-            name: h.name,
-            icon: h.icon,
-            frequency: h.frequency,
-            color: h.color,
-            streak: 0, // This is calculated in stats now
-        }));
-        setHabits(mappedHabits);
-
-        const allLogs = habitsData.flatMap((h: any) => h.habit_logs.map((l: any): HabitLog => ({
-            id: l.id,
-            habitId: l.habit_id,
-            date: l.date,
-            note: l.note,
-        })));
-        setHabitLogs(allLogs);
-    } else {
-        calculateAndSetUserStats([], userInteractions);
-        setHabits([]);
-        setHabitLogs([]);
-    }
-    
-    // Fetch habit groups
-    const { data: groupsData, error: groupsError } = await supabase
-        .from('habit_groups')
-        .select('*, creator:profiles(*), members:habit_group_members(profiles(*))');
-
-    if (groupsData) {
-        // FIX: Explicitly type the return value of the map function and ensure the returned object conforms to the HabitGroup type.
-        const mappedGroups: HabitGroup[] = groupsData.map((g: any): HabitGroup | null => {
-             const members = g.members.map((m: any) => mapProfileToUser(m.profiles)).filter(Boolean) as User[];
-             const creator = mapProfileToUser(g.creator);
-             
-             if (!creator) return null;
-
-             const category = HABIT_CATEGORIES.find(cat => cat.emoji === g.emoji);
-             const tagName = category ? translations[language][category.translationKey] : 'General';
-
-             return {
-                id: g.id,
-                name: g.name,
-                emoji: g.emoji,
-                description: g.description,
-                isPrivate: g.is_private,
-                coverImageUrl: g.cover_image_url || undefined,
-                creator: creator,
-                members: members,
-                memberCount: members.length,
-                tag: {
-                    emoji: g.emoji,
-                    text: tagName
-                }
-             };
-        }).filter((g): g is HabitGroup => g !== null);
-        setHabitGroups(mappedGroups);
-    }
-
-  }, [currentUser, language, calculateAndSetUserStats]);
-
-  // Fetch user profile and data after session is set
-  useEffect(() => {
-    if (session && !currentUser) {
-      setLoading(true);
-      supabase.from('profiles').select('*').eq('id', session.user.id).single().then(({data, error}) => {
-          if (data) {
-              const userProfile = mapProfileToUser(data);
-              if(userProfile) setCurrentUser(userProfile);
-          }
-          if (error) console.error("Error fetching profile:", error);
-          setLoading(false);
-      });
-    } else if (currentUser) {
-        fetchData();
-    }
-  }, [session, currentUser, fetchData]);
-
-
-  const [hasUnreadMessages, setHasUnreadMessages] = useState(false); // Placeholder
+  });
 
   const t = translations[language];
   const unreadNotificationCount = notifications.filter(n => !n.isRead).length;
-  
-  const myHabitGroupIds: string[] = currentUser ? habitGroups.filter(hg => hg.members.some(m => m.id === currentUser.id)).map(hg => hg.id) : []; 
-  const pendingJoinRequestIds: string[] = [];
+  const myHabitGroupIds = habitGroups.filter(h => h.members.some(m => m.id === currentUser.id) || h.creator.id === currentUser.id).map(h => h.id);
+  const pendingJoinRequestIds = joinRequests.filter(r => r.userId === currentUser.id).map(r => r.habitGroupId);
 
-  const handleLogin = async (email: string, pass: string): Promise<string | null> => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
-    if (error) {
-      return error.message;
+  const handleLogin = (email: string, pass: string): boolean => {
+    if (email === DUMMY_USER.email && pass === DUMMY_USER.password) {
+      setAuthUser(DUMMY_USER.user);
+      setCurrentUser(DUMMY_USER.user);
+      setAuthModal({ isOpen: false, mode: 'login' });
+      return true;
     }
-    setAuthModal({ isOpen: false, mode: 'login' });
-    return null;
-  };
-  
-  const handleRegister = async (fullName: string, email: string, pass: string): Promise<string | null> => {
-    const { error } = await supabase.auth.signUp({ 
-        email, 
-        password: pass,
-        options: {
-            data: {
-                full_name: fullName,
-                avatar_url: `https://i.pravatar.cc/150?u=${email}`
-            }
-        }
-    });
-     if (error) {
-      return error.message;
-    }
-    setAuthModal({ isOpen: false, mode: 'register'});
-    setShowConfirmationModal(true);
-    return null;
+    alert("Invalid credentials!");
+    return false;
   };
 
-  const handleForgotPassword = async (email: string): Promise<string | null> => {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: window.location.origin,
-    });
-    if (error) {
-        return error.message;
-    }
-    alert('Password reset link sent! Please check your email.');
-    setAuthModal({isOpen: false, mode: 'forgot'});
-    return null;
-  };
-
-
-  const handleLogout = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) console.error('Error logging out:', error.message);
+  const handleLogout = () => {
+    setAuthUser(null);
   };
 
   const setCurrentView = (view: View, user: User | null = null) => {
     setView(view);
-    if (view === 'profile' && user) {
-        setViewingUser(user);
+    if (view === 'profile') {
+        setViewingUser(user || currentUser);
     } else {
         setViewingUser(null);
     }
@@ -475,112 +218,136 @@ export default function App() {
     }
   };
 
-  const handleAddHabit = async (newHabit: Omit<Habit, 'id' | 'streak'>) => {
-    if (!currentUser) return;
-    const colors = ['purple', 'green', 'blue', 'pink'];
-    const randomColor = colors[Math.floor(Math.random() * colors.length)];
-    
-    const { data, error } = await supabase
-      .from('habits')
-      .insert({
-        user_id: currentUser.id,
-        name: newHabit.name,
-        icon: newHabit.icon,
-        frequency: newHabit.frequency,
-        color: randomColor,
-      })
-      .select()
-      .single();
-
-    if (data) {
-        const addedHabit: Habit = {
-            id: data.id,
-            name: data.name,
-            icon: data.icon,
-            frequency: data.frequency,
-            color: data.color,
-            streak: 0,
-        };
-        setHabits(prev => [...prev, addedHabit]);
-    }
-    if (error) console.error("Error adding habit:", error);
+  const handleAddHabit = (newHabit: Omit<Habit, 'id' | 'streak'>) => {
+    const habitToAdd: Habit = {
+      ...newHabit,
+      id: `habit-${Date.now()}`,
+      streak: 0,
+      color: ['purple', 'green', 'blue', 'pink'][Math.floor(Math.random() * 4)],
+    };
+    setHabits(prev => [habitToAdd, ...prev]);
     setIsAddHabitModalOpen(false);
   };
   
-  const handleAddHabitGroup = async (data: { name: string, description: string, category: string, rules: string, isPrivate: boolean, coverImageUrl?: string }) => {
-    if (!currentUser) return;
-    const categoryInfo = HABIT_CATEGORIES.find(c => c.id === data.category);
-    if (!categoryInfo) return;
-
-    const fullDescription = data.rules ? `${data.description}\n\n**Rules:**\n${data.rules}` : data.description;
-    
-    const { data: newGroupData, error } = await supabase
-        .from('habit_groups')
-        .insert({
-            name: data.name,
-            description: fullDescription,
-            emoji: categoryInfo.emoji,
-            is_private: data.isPrivate,
-            cover_image_url: data.coverImageUrl,
-            creator_id: currentUser.id
-        })
-        .select()
-        .single();
-    
-    if (error) {
-      console.error("Error adding habit group:", error);
-    } else if (newGroupData) {
-      // Optimistically update UI for instant feedback, then refetch to ensure consistency.
-      const creator = currentUser;
-      const category = HABIT_CATEGORIES.find(cat => cat.emoji === newGroupData.emoji);
-      const tagName = category ? translations[language][category.translationKey] : 'General';
-
-      const newHabitGroup: HabitGroup = {
-          id: newGroupData.id,
-          name: newGroupData.name,
-          emoji: newGroupData.emoji,
-          description: newGroupData.description,
-          isPrivate: newGroupData.is_private,
-          coverImageUrl: newGroupData.cover_image_url || undefined,
-          creator: creator,
-          members: [creator],
-          memberCount: 1,
-          tag: {
-              emoji: newGroupData.emoji,
-              text: tagName
-          }
-      };
-      setHabitGroups(prev => [...prev, newHabitGroup]);
-      
-      // Fetch data in the background to sync with the database source of truth
-      fetchData();
-    }
-
+  const handleAddHabitGroup = (data: { name: string, description: string, category: string, rules: string, isPrivate: boolean, coverImageUrl?: string }) => {
+    const newHabitGroup: HabitGroup = {
+        id: `huddle-${Date.now()}`,
+        name: data.name,
+        emoji: '🆕',
+        description: data.description,
+        memberCount: 1,
+        members: [],
+        tag: { emoji: '🏷️', text: data.category },
+        color: ['teal', 'purple', 'blue', 'green', 'yellow', 'pink'][Math.floor(Math.random() * 6)],
+        creator: currentUser,
+        isPrivate: data.isPrivate,
+        coverImageUrl: data.coverImageUrl,
+    };
+    setHabitGroups(prev => [newHabitGroup, ...prev]);
+    setNewHabitGroupIds(prev => [...prev, newHabitGroup.id]);
     setIsAddHabitGroupModalOpen(false);
   };
 
   const handleAddPost = (habitGroupId: string, note: string, imageUrl?: string) => {
-    // Supabase logic here
+    const newPost: Post = {
+      id: `post-${Date.now()}`,
+      user: currentUser,
+      habitGroupId,
+      timestamp: new Date(),
+      note,
+      imageUrl,
+      supports: 0,
+      supportedBy: [],
+      pushes: 0,
+      pushedBy: [],
+      comments: [],
+      streak: Math.floor(Math.random() * 20) + 1,
+    };
+    setPosts(prev => [newPost, ...prev]);
   };
   
   const handlePostInteraction = (postId: string, interactionType: 'support' | 'push') => {
-    // Supabase logic here
+    setPosts(prevPosts => prevPosts.map(post => {
+      if (post.id === postId) {
+        const newPost = { ...post };
+        const userId = currentUser.id;
+        
+        newPost.supportedBy = [...(newPost.supportedBy || [])];
+        newPost.pushedBy = [...(newPost.pushedBy || [])];
+        
+        const hasSupported = newPost.supportedBy.includes(userId);
+        const hasPushed = newPost.pushedBy.includes(userId);
+
+        if (interactionType === 'support') {
+          if (hasSupported) {
+            newPost.supports--;
+            newPost.supportedBy = newPost.supportedBy.filter(id => id !== userId);
+          } else {
+            newPost.supports++;
+            newPost.supportedBy.push(userId);
+            if (hasPushed) {
+              newPost.pushes--;
+              newPost.pushedBy = newPost.pushedBy.filter(id => id !== userId);
+            }
+          }
+        } else if (interactionType === 'push') {
+          if (hasPushed) {
+            newPost.pushes--;
+            newPost.pushedBy = newPost.pushedBy.filter(id => id !== userId);
+          } else {
+            newPost.pushes++;
+            newPost.pushedBy.push(userId);
+            if (hasSupported) {
+              newPost.supports--;
+              newPost.supportedBy = newPost.supportedBy.filter(id => id !== userId);
+            }
+          }
+        }
+        return newPost;
+      }
+      return post;
+    }));
   };
   
   const handleAddComment = (postId: string, commentText: string) => {
-    // Supabase logic here
+    if (!commentText.trim()) return;
+    const newComment: Comment = {
+      user: currentUser,
+      text: commentText.trim(),
+      timestamp: new Date(),
+    };
+    setPosts(posts.map(p => 
+      p.id === postId ? { ...p, comments: [...p.comments, newComment] } : p
+    ));
   };
 
   const handleJoinHabitGroup = (habitGroupId: string) => {
-    // Supabase logic here
+    setHabitGroups(habitGroups.map(h => h.id === habitGroupId ? { ...h, members: [...h.members, currentUser], memberCount: h.memberCount + 1 } : h));
   };
   
   const handleRequestToJoinHabitGroup = (habitGroupId: string) => {
-    // Supabase logic here
+    const habitGroup = habitGroups.find(h => h.id === habitGroupId);
+    if (!habitGroup) return;
+    setJoinRequests(prev => [...prev, { userId: currentUser.id, habitGroupId }]);
+    
+    const newNotification: Notification = {
+      id: `notif-${Date.now()}`,
+      type: 'join_request',
+      actor: currentUser,
+      timestamp: new Date(),
+      isRead: false,
+      target: { type: 'habit_group', id: habitGroupId }
+    };
+    setNotifications(prev => [newNotification, ...prev]);
   };
   
   const handleJoinRequestResponse = (notification: Notification, accept: boolean) => {
-    // Supabase logic here
+    if (accept) {
+        const habitGroupId = notification.target.id;
+        setHabitGroups(prev => prev.map(h => h.id === habitGroupId ? { ...h, members: [...h.members, notification.actor], memberCount: h.memberCount + 1 } : h));
+    }
+    setJoinRequests(prev => prev.filter(r => !(r.userId === notification.actor.id && r.habitGroupId === notification.target.id)));
+    setNotifications(prev => prev.filter(n => n.id !== notification.id));
   };
 
   const handleUpdateHabitGroup = (habitGroupId: string, updates: Partial<HabitGroup>) => {
@@ -588,27 +355,27 @@ export default function App() {
     setManagingHabitGroup(prev => prev ? {...prev, ...updates} : null);
   };
 
-  const handleDeleteHabitGroup = async (habitGroupId: string) => {
-    if (!currentUser) return;
-    const { error } = await supabase
-        .from('habit_groups')
-        .delete()
-        .eq('id', habitGroupId);
-
-    if (error) {
-        console.error("Error deleting habit group:", error);
-    } else {
-        await fetchData();
-        if (selectedHabitGroupId === habitGroupId) {
-            setSelectedHabitGroupId(null);
-        }
+  const handleDeleteHabitGroup = (habitGroupId: string) => {
+    setHabitGroups(prev => prev.filter(h => h.id !== habitGroupId));
+    if (selectedHabitGroupId === habitGroupId) {
+        setSelectedHabitGroupId(null);
+        setView('feed');
     }
     setIsManagementModalOpen(false);
     setManagingHabitGroup(null);
   };
 
   const handleRemoveMember = (habitGroupId: string, memberId: string) => {
-    // Supabase logic here
+    setHabitGroups(prev => prev.map(h => {
+        if (h.id === habitGroupId) {
+            return {
+                ...h,
+                members: h.members.filter(m => m.id !== memberId),
+                memberCount: h.memberCount -1,
+            };
+        }
+        return h;
+    }));
   };
 
   const handleOpenHabitLogDetail = (log: HabitLog) => {
@@ -616,114 +383,53 @@ export default function App() {
     setIsHabitLogDetailModalOpen(true);
   };
   
-  const handleOpenAddHabitLog = (habitId: string, date: Date) => {
+  const handleOpenAddHabitLog = (habitId: string, date: number) => {
     setHabitLogContext({ habitId, date });
     setIsAddHabitLogModalOpen(true);
   };
 
-  const handleAddHabitLog = async (note: string) => {
-    if (!currentUser || !habitLogContext) return;
-
-    const dateString = habitLogContext.date.toISOString().split('T')[0];
-
-    const { error } = await supabase
-      .from('habit_logs')
-      .insert({
-        habit_id: habitLogContext.habitId,
-        date: dateString,
-        note: note
-      });
-
-    if (error) {
-        console.error("Error adding habit log:", error);
-    } else {
-        await fetchData();
-    }
-    
+  const handleAddHabitLog = (note: string) => {
+    if (!habitLogContext) return;
+    const newLog: HabitLog = {
+      id: `log-${Date.now()}`,
+      habitId: habitLogContext.habitId,
+      date: habitLogContext.date,
+      note,
+    };
+    setHabitLogs(prev => [...prev, newLog]);
     setIsAddHabitLogModalOpen(false);
     setHabitLogContext(null);
   };
   
-  const handleEditHabitLog = async (logId: string, newNote: string) => {
-    const { data, error } = await supabase
-        .from('habit_logs')
-        .update({ note: newNote })
-        .eq('id', logId)
-        .select()
-        .single();
-    
-    if (error) {
-        console.error("Error editing habit log:", error);
-    } else if (data) {
-        setHabitLogs(prev => prev.map(log => log.id === logId ? { ...log, note: data.note } : log));
-    }
+  const handleEditHabitLog = (logId: string, newNote: string) => {
+    setHabitLogs(prevLogs => 
+      prevLogs.map(log => 
+        log.id === logId ? { ...log, note: newNote } : log
+      )
+    );
     setIsHabitLogDetailModalOpen(false);
   };
 
-  const handleUpdateAvatar = async (newAvatarUrl: string) => {
-    if (!currentUser) return;
-    const { data, error } = await supabase
-      .from('profiles')
-      .update({ avatar_url: newAvatarUrl })
-      .eq('id', currentUser.id)
-      .select()
-      .single();
-    
-    if (data) {
-        setCurrentUser(prev => prev ? { ...prev, avatarUrl: data.avatar_url } : null);
-        if (viewingUser?.id === currentUser.id) {
-            setViewingUser(prev => prev ? { ...prev, avatarUrl: data.avatar_url } : null);
-        }
-    }
-    if (error) console.error("Error updating avatar:", error);
+  const handleUpdateAvatar = (newAvatarUrl: string) => {
+    setCurrentUser(prevUser => ({ ...prevUser, avatarUrl: newAvatarUrl }));
+    setViewingUser(prevUser => (prevUser?.id === currentUser.id ? { ...prevUser, avatarUrl: newAvatarUrl } : prevUser));
   };
   
-  const handleUpdateUserName = async (newName: string) => {
-    if (!currentUser) return;
-    const { data, error } = await supabase
-      .from('profiles')
-      .update({ name: newName })
-      .eq('id', currentUser.id)
-      .select()
-      .single();
-      
-    if (data) {
-        setCurrentUser(prev => prev ? { ...prev, name: data.name } : null);
-        if (viewingUser?.id === currentUser.id) {
-            setViewingUser(prev => prev ? { ...prev, name: data.name } : null);
-        }
-    }
-    if (error) console.error("Error updating name:", error);
+  const handleUpdateUserName = (newName: string) => {
+    setCurrentUser(prev => ({...prev, name: newName }));
+    setViewingUser(prev => (prev?.id === currentUser.id ? {...prev, name: newName} : prev));
   };
 
-  const handleDeleteHabit = async (habitId: string) => {
-    if (!currentUser) return;
+  const handleDeleteHabit = (habitId: string) => {
     if (window.confirm(t.deleteHabitConfirmation)) {
-        const { error } = await supabase
-            .from('habits')
-            .delete()
-            .eq('id', habitId);
-        
-        if (error) {
-            console.error("Error deleting habit:", error);
-        } else {
-            await fetchData();
-        }
+      setHabits(prev => prev.filter(h => h.id !== habitId));
+      setHabitLogs(prev => prev.filter(l => l.habitId !== habitId));
     }
   };
 
-  const handleDeleteHabitLog = async (logId: string) => {
+  const handleDeleteHabitLog = (logId: string) => {
     if (window.confirm(t.deleteHabitLogConfirmation)) {
-        const { error } = await supabase
-            .from('habit_logs')
-            .delete()
-            .eq('id', logId);
-        
-        if (error) {
-            console.error("Error deleting habit log:", error);
-        } else {
-            await fetchData();
-        }
+      setHabitLogs(prev => prev.filter(l => l.id !== logId));
     }
   };
   
@@ -732,7 +438,7 @@ export default function App() {
   };
 
   const renderContent = () => {
-    if (viewingUser && currentUser) {
+    if (viewingUser) {
         return <Profile 
                   currentUser={currentUser}
                   viewingUser={viewingUser} 
@@ -747,10 +453,8 @@ export default function App() {
                   onUpdateName={handleUpdateUserName}
                   onDeleteHabit={handleDeleteHabit}
                   onDeleteHabitLog={handleDeleteHabitLog}
-                  userStats={userStats}
                />;
     }
-    if (!currentUser) return null; // Or a loading spinner
 
     switch (currentView) {
       case 'messages':
@@ -778,15 +482,7 @@ export default function App() {
   const isHabitGroupView = currentView === 'feed' && !!selectedHabitGroupId;
   const mainOverflowClass = isHabitGroupView ? 'overflow-hidden' : 'overflow-y-auto';
   
-  if (loading) {
-    return (
-        <div className="min-h-screen font-sans flex items-center justify-center bg-slate-50 dark:bg-slate-950">
-            <p className="text-slate-500 dark:text-slate-400">Loading...</p>
-        </div>
-    );
-  }
-
-  if (!session) {
+  if (!authUser) {
     return (
       <>
         <LandingPage 
@@ -801,28 +497,9 @@ export default function App() {
           onClose={() => setAuthModal({ ...authModal, isOpen: false })}
           onSwitchMode={(mode) => setAuthModal({ isOpen: true, mode })}
           onLogin={handleLogin}
-          onRegister={handleRegister}
-          onForgotPassword={handleForgotPassword}
-          t={t}
-        />
-        <ConfirmationModal
-          isOpen={showConfirmationModal}
-          onClose={() => setShowConfirmationModal(false)}
-          onGoToLogin={() => {
-            setShowConfirmationModal(false);
-            setAuthModal({ isOpen: true, mode: 'login'});
-          }}
           t={t}
         />
       </>
-    );
-  }
-
-  if (!currentUser) {
-     return (
-        <div className="min-h-screen font-sans flex items-center justify-center bg-slate-50 dark:bg-slate-950">
-            <p className="text-slate-500 dark:text-slate-400">Loading user profile...</p>
-        </div>
     );
   }
 
@@ -832,7 +509,7 @@ export default function App() {
         <Sidebar 
             currentView={currentView}
             setCurrentView={setCurrentView} 
-            habitGroups={habitGroups.filter(hg => myHabitGroupIds.includes(hg.id))}
+            habitGroups={habitGroups}
             onOpenAddHabitGroupModal={() => setIsAddHabitGroupModalOpen(true)}
             t={t}
             selectedHabitGroupId={selectedHabitGroupId}

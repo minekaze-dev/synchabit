@@ -108,6 +108,7 @@ export default function Settings({ language, setLanguage, theme, setTheme, t, on
         </div>
       </div>
       
+      {/* FIX: Explicitly pass children prop to LegalModal to satisfy its prop requirements. */}
       <LegalModal
           isOpen={!!modalContent}
           onClose={() => setModalContent(null)}

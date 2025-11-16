@@ -1,5 +1,4 @@
 
-
 import React, { useState } from 'react';
 import { Post } from '../types';
 import { ENCOURAGEMENT_TEMPLATES, CURRENT_USER } from '../constants';
@@ -46,6 +45,7 @@ const FeedItem: React.FC<FeedItemProps> = ({ post, onSupport, t }) => {
           <div className="flex justify-between items-start">
             <div>
               <p className="font-semibold text-slate-900">{post.user.name}</p>
+              {/* FIX: Property 'habit' does not exist on type 'Post'. The 'habit.name' was removed. */}
               <p className="text-xs text-slate-500">{timeSince(post.timestamp)}</p>
             </div>
           </div>
@@ -58,9 +58,11 @@ const FeedItem: React.FC<FeedItemProps> = ({ post, onSupport, t }) => {
             <img src={post.imageUrl} alt="Progress snapshot" className="mt-3 rounded-lg w-full object-cover max-h-80" />
           )}
 
+          {/* FIX: Property 'habit' does not exist on type 'Post'. Changed to use 'post.streak' directly. */}
           {isCurrentUser && post.streak > 0 && (
              <div className="mt-4">
                 <span className="inline-block bg-gradient-to-r from-pink-500 to-purple-500 text-white text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider">
+                    {/* FIX: Property 'habit' does not exist on type 'Post'. Changed to use 'post.streak' directly. */}
                     {post.streak}-{t.dayStreak}
                 </span>
              </div>
