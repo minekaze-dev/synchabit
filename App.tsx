@@ -747,13 +747,21 @@ export default function App() {
     setNewHabitGroupIds([]);
   };
 
+  const handleViewGroup = (groupId: string) => {
+    setSelectedHabitGroupId(groupId);
+    setView('feed');
+    setViewingUser(null);
+  };
+
   const renderContent = () => {
     if (viewingUser && currentUser) {
+        const userJoinedHabitGroups = habitGroups.filter(hg => hg.members.some(m => m.id === viewingUser.id));
         return <Profile 
                   currentUser={currentUser}
                   viewingUser={viewingUser} 
                   habits={habits} 
                   habitLogs={habitLogs}
+                  joinedHabitGroups={userJoinedHabitGroups}
                   t={t} 
                   onOpenAddHabitModal={() => setIsAddHabitModalOpen(true)}
                   onOpenHabitLogDetail={handleOpenHabitLogDetail}
@@ -764,6 +772,7 @@ export default function App() {
                   onDeleteHabit={handleDeleteHabit}
                   onDeleteHabitLog={handleDeleteHabitLog}
                   userStats={userStats}
+                  onViewGroup={handleViewGroup}
                />;
     }
     if (!currentUser) return null; // Or a loading spinner
