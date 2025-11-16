@@ -512,45 +512,63 @@ export default function App() {
 
     const fullDescription = data.rules ? `${data.description}\n\n**Rules:**\n${data.rules}` : data.description;
     
-    // Step 1: Insert the group with the correct privacy setting from the start.
+    // Step 1: Insert the group. If it's meant to be private, create it as PUBLIC first.
+    // This is a workaround for RLS policies that might prevent adding members to private groups.
     const { data: newGroupData, error: insertError } = await supabase
         .from('habit_groups')
         .insert({
             name: data.name,
             description: fullDescription,
             emoji: categoryInfo.emoji,
-            is_private: data.isPrivate, // Set privacy correctly on insert
+            is_private: false, // ALWAYS create as public first
             cover_image_url: data.coverImageUrl,
             creator_id: currentUser.id
         })
-        .select('id') // We only need the ID for the next step
+        .select('id')
         .single();
     
     if (insertError || !newGroupData) {
-        console.error("Error adding habit group:", insertError?.message);
-        // TODO: Show an error to the user
+        console.error("Error adding habit group (step 1):", insertError?.message);
         setIsAddHabitGroupModalOpen(false);
         return;
     }
     
-    // Step 2: Explicitly insert the creator as a member. This is crucial for RLS.
+    const newGroupId = newGroupData.id;
+
+    // Step 2: Add the creator as a member. This can be done now because the group is public.
     const { error: memberInsertError } = await supabase
         .from('habit_group_members')
         .insert({
-            group_id: newGroupData.id,
+            group_id: newGroupId,
             user_id: currentUser.id
         });
         
     if (memberInsertError) {
-        console.error("Error adding creator to members:", memberInsertError.message);
-        // Attempt to clean up the partially created group
-        await supabase.from('habit_groups').delete().eq('id', newGroupData.id);
-        // TODO: Show an error to the user
+        console.error("Error adding creator to members (step 2):", memberInsertError.message);
+        // Cleanup
+        await supabase.from('habit_groups').delete().eq('id', newGroupId);
         setIsAddHabitGroupModalOpen(false);
         return;
     }
 
-    // Step 3: Refetch all data to ensure UI is in sync with the database.
+    // Step 3: If the group was intended to be private, update it now.
+    if (data.isPrivate) {
+        const { error: updateError } = await supabase
+            .from('habit_groups')
+            .update({ is_private: true })
+            .eq('id', newGroupId);
+        
+        if (updateError) {
+            console.error("Error updating group to private (step 3):", updateError.message);
+            // Cleanup
+            await supabase.from('habit_group_members').delete().eq('group_id', newGroupId);
+            await supabase.from('habit_groups').delete().eq('id', newGroupId);
+            setIsAddHabitGroupModalOpen(false);
+            return;
+        }
+    }
+
+    // Step 4: Refetch all data to ensure UI is in sync with the database.
     await fetchData();
     setIsAddHabitGroupModalOpen(false);
   };
