@@ -21,10 +21,6 @@ export const translations = {
     pushes: 'Pushes!',
     habitStreaks: 'Habit Streaks',
     addHabitNote: 'Add Habit Note',
-    addNewHabit: 'Add New Habit',
-    myHabitGroupsSection: 'My Habit Groups',
-    noGroupsJoined: "You haven't joined any groups yet.",
-    viewGroup: 'View Group',
     interactionStats: 'Interaction Statistics',
     checkinConsistency: 'Check-in Consistency',
     consistencyMessage: "Good job! You're on the right track.",
@@ -65,7 +61,7 @@ export const translations = {
     checkIn: 'Check In',
 
     // AddHabitModal
-    // addNewHabit: 'Add a New Habit', // Already exists
+    addNewHabit: 'Add a New Habit',
     habitName: 'Habit Name',
     habitNamePlaceholder: 'e.g., Read for 15 minutes',
     chooseAnIcon: 'Choose an Icon',
@@ -223,10 +219,6 @@ export const translations = {
     pushes: 'Push Terus!',
     habitStreaks: 'Renteten Kebiasaan',
     addHabitNote: 'Tambah Catatan Habit',
-    addNewHabit: 'Tambah Habit Baru',
-    myHabitGroupsSection: 'Grup Habit Saya',
-    noGroupsJoined: 'Anda belum bergabung dengan grup manapun.',
-    viewGroup: 'Lihat Grup',
     interactionStats: 'STATISTIK INTERAKSI',
     checkinConsistency: 'Konsistensi Check-in',
     consistencyMessage: 'Kerja bagus! Anda berada di jalur yang benar.',
@@ -268,7 +260,7 @@ export const translations = {
     checkIn: 'Check In',
 
     // AddHabitModal
-    // addNewHabit: 'Tambah Kebiasaan Baru', // Already exists
+    addNewHabit: 'Tambah Kebiasaan Baru',
     habitName: 'Nama Kebiasaan',
     habitNamePlaceholder: 'Contoh: Membaca selama 15 menit',
     chooseAnIcon: 'Pilih Ikon',

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Habit, HabitLog, HabitGroup } from '../types';
+import { User, Habit, HabitLog } from '../types';
 import Avatar from './Avatar';
 import Icon from './Icon';
 
@@ -8,7 +8,6 @@ interface ProfileProps {
   viewingUser: User;
   habits: Habit[];
   habitLogs: HabitLog[];
-  joinedHabitGroups: HabitGroup[];
   t: any;
   onOpenAddHabitModal: () => void;
   onOpenHabitLogDetail: (log: HabitLog) => void;
@@ -25,7 +24,6 @@ interface ProfileProps {
     totalCheers: number;
     totalPushes: number;
   };
-  onViewGroup: (groupId: string) => void;
 }
 
 const ProgressCard: React.FC<{ 
@@ -145,7 +143,7 @@ const ProgressCard: React.FC<{
     </div>
 )};
 
-const HabitProgressItem: React.FC<{ 
+const HabitCalendar: React.FC<{ 
     habit: Habit; 
     logs: HabitLog[]; 
     onOpenHabitLogDetail: (log: HabitLog) => void; 
@@ -154,20 +152,30 @@ const HabitProgressItem: React.FC<{
     onDeleteHabitLog: (logId: string) => void;
     isOwnProfile: boolean;
 }> = ({ habit, logs, onOpenHabitLogDetail, onOpenAddHabitLog, onDeleteHabit, onDeleteHabitLog, isOwnProfile }) => {
-    const displayDate = new Date(); // Always show current month
-    const daysOfWeek = ['M', 'S', 'S', 'R', 'K', 'J', 'S'];
+    const [displayDate, setDisplayDate] = useState(new Date());
+
+    const daysOfWeek = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
     
     const year = displayDate.getFullYear();
     const month = displayDate.getMonth();
+    const monthName = displayDate.toLocaleDateString('default', { month: 'long', year: 'numeric' });
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const firstDayOfMonth = (new Date(year, month, 1).getDay() + 6) % 7; // Monday is 0
+    const firstDayOfMonth = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
 
     const calendarGrid = Array(firstDayOfMonth).fill(null).concat(Array.from({ length: daysInMonth }, (_, i) => i + 1));
     
+    const changeMonth = (offset: number) => {
+        setDisplayDate(prev => {
+            const newDate = new Date(prev);
+            newDate.setMonth(prev.getMonth() + offset);
+            return newDate;
+        });
+    };
+
     const colorClasses: { [key: string]: { bg: string, text: string, border: string, gradient: string, hover: string } } = {
         purple: { bg: 'bg-pink-200', text: 'text-pink-600', border: 'border-pink-500', gradient: 'from-purple-400 to-pink-400', hover: 'hover:bg-pink-300' },
         green: { bg: 'bg-green-200', text: 'text-green-600', border: 'border-green-500', gradient: 'from-green-400 to-teal-400', hover: 'hover:bg-green-300' },
@@ -204,8 +212,13 @@ const HabitProgressItem: React.FC<{
                     )}
                 </div>
             </div>
-            <div className="grid grid-cols-7 gap-1 text-center mt-3">
-                {daysOfWeek.map((day, i) => <div key={i} className="text-xs font-bold text-slate-400 dark:text-slate-500">{day}</div>)}
+            <div className="flex justify-between items-center my-3 px-2">
+                <button onClick={() => changeMonth(-1)} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">{'<'}</button>
+                <div className="font-bold text-slate-700 dark:text-slate-300">{monthName}</div>
+                <button onClick={() => changeMonth(1)} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">{'>'}</button>
+            </div>
+            <div className="grid grid-cols-7 gap-y-1 text-center">
+                {daysOfWeek.map(day => <div key={day} className="text-xs font-bold text-slate-400 dark:text-slate-500">{day}</div>)}
                 {calendarGrid.map((day, i) => {
                     if (!day) return <div key={`empty-${i}`} />;
                     
@@ -219,17 +232,30 @@ const HabitProgressItem: React.FC<{
                     const isPastOrToday = currentDate <= today;
                     const isClickable = isOwnProfile && (isStreaked || (isPastOrToday && !isStreaked));
 
-                    const dayClasses = `w-full aspect-square flex items-center justify-center rounded-md text-xs font-semibold mx-auto transition-colors
-                        ${isToday ? `border-2 ${colors.border}` : ''}
-                        ${isStreaked ? `${colors.bg} ${colors.text}` : 'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500'}
-                        ${isClickable ? `cursor-pointer ${isStreaked ? colors.hover : 'hover:bg-slate-200 dark:hover:bg-slate-700'}` : 'cursor-default'}
+                    const dayClasses = `w-8 h-8 flex items-center justify-center rounded-full text-sm font-semibold mx-auto transition-colors
+                        ${isToday ? `${colors.bg} ${colors.text} border-2 ${colors.border}` : ''}
+                        ${!isToday && isStreaked ? `${colors.bg} ${colors.text}` : ''}
+                        ${!isToday && !isStreaked ? 'text-slate-400 dark:text-slate-500' : ''}
+                        ${isClickable ? `cursor-pointer ${isStreaked ? colors.hover : 'hover:bg-slate-100 dark:hover:bg-slate-800'}` : 'cursor-default'}
                     `;
 
                     return (
-                        <div key={day} className="relative group" onClick={() => isClickable && handleDateClick(day)}>
+                        <div key={day} className="relative h-8 group" onClick={() => isClickable && handleDateClick(day)}>
                            <div className={dayClasses}>
                                 {day}
                            </div>
+                           {isOwnProfile && logForDay && (
+                               <button 
+                                   onClick={(e) => { 
+                                       e.stopPropagation(); 
+                                       onDeleteHabitLog(logForDay.id); 
+                                   }} 
+                                   className="absolute top-0 right-0 bg-red-500 text-white rounded-full p-0.5 h-5 w-5 flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-red-600 transition-all transform -translate-y-1 translate-x-1"
+                                   aria-label="Delete log"
+                               >
+                                    <Icon name="trash" className="h-3 w-3" />
+                               </button>
+                           )}
                         </div>
                     );
                 })}
@@ -310,43 +336,11 @@ const AchievementsCard: React.FC<{ t: any; maxStreak: number }> = ({ t, maxStrea
     );
 };
 
-const MyHabitGroupsCard: React.FC<{ groups: HabitGroup[]; onViewGroup: (groupId: string) => void; t: any; }> = ({ groups, onViewGroup, t }) => (
-  <div>
-    <h2 className="text-xl font-bold text-slate-800 dark:text-slate-200 mb-4">{t.myHabitGroupsSection}</h2>
-    <div className="bg-white dark:bg-slate-900/70 p-4 rounded-xl shadow-sm">
-      {groups.length > 0 ? (
-        <div className="space-y-2">
-          {groups.map(group => (
-            <button
-              key={group.id}
-              onClick={() => onViewGroup(group.id)}
-              className="w-full flex items-center justify-between p-3 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-            >
-              <div className="flex items-center gap-3">
-                <span className="text-2xl">{group.emoji}</span>
-                <div className="text-left">
-                  <p className="font-bold text-slate-800 dark:text-slate-200">{group.name}</p>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">{group.memberCount} {t.members}</p>
-                </div>
-              </div>
-              <Icon name="home" className="w-5 h-5 text-slate-400" />
-            </button>
-          ))}
-        </div>
-      ) : (
-        <p className="text-sm text-slate-500 dark:text-slate-400 p-3 text-center">{t.noGroupsJoined}</p>
-      )}
-    </div>
-  </div>
-);
-
-
 const Profile: React.FC<ProfileProps> = ({
   currentUser,
   viewingUser,
   habits,
   habitLogs,
-  joinedHabitGroups,
   t,
   onOpenAddHabitModal,
   onOpenHabitLogDetail,
@@ -356,8 +350,7 @@ const Profile: React.FC<ProfileProps> = ({
   onUpdateName,
   onDeleteHabit,
   onDeleteHabitLog,
-  userStats,
-  onViewGroup,
+  userStats
 }) => {
   const isOwnProfile = currentUser.id === viewingUser.id;
   const userHabits = isOwnProfile ? habits : habits.slice(0, 2);
@@ -383,13 +376,13 @@ const Profile: React.FC<ProfileProps> = ({
                   onClick={onOpenAddHabitModal} 
                   className="flex items-center gap-2 bg-brand-teal-500 text-white font-bold py-2 px-4 rounded-lg hover:bg-brand-teal-600 transition-colors text-sm shadow">
                     <Icon name="plus" className="w-4 h-4" />
-                    <span>{t.addNewHabit}</span>
+                    <span>{t.addHabitNote}</span>
                 </button>
             )}
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {userHabits.map((habit) => (
-              <HabitProgressItem
+              <HabitCalendar
                 key={habit.id}
                 habit={habit}
                 logs={habitLogs.filter(l => l.habitId === habit.id)}
@@ -402,9 +395,6 @@ const Profile: React.FC<ProfileProps> = ({
             ))}
           </div>
         </div>
-
-        <MyHabitGroupsCard groups={joinedHabitGroups} onViewGroup={onViewGroup} t={t} />
-
       </div>
 
       <div className="lg:col-span-1 space-y-6">

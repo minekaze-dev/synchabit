@@ -549,29 +549,9 @@ export default function App() {
         }
     }
 
-    // Step 3: Manually construct the new group object for an immediate and reliable UI update.
-    // This avoids race conditions with fetchData().
-    const category = HABIT_CATEGORIES.find(cat => cat.emoji === categoryInfo.emoji);
-    const tagName = category ? translations[language][category.translationKey] : 'General';
-
-    const newHabitGroupForUI: HabitGroup = {
-        id: newGroupData.id,
-        name: data.name,
-        emoji: categoryInfo.emoji,
-        description: fullDescription,
-        isPrivate: data.isPrivate,
-        coverImageUrl: data.coverImageUrl || undefined,
-        creator: currentUser,
-        members: [currentUser],
-        memberCount: 1,
-        tag: {
-            emoji: categoryInfo.emoji,
-            text: tagName
-        },
-        color: undefined // color is not set on creation
-    };
-
-    setHabitGroups(prev => [...prev, newHabitGroupForUI]);
+    // Step 3: Refetch all data to ensure UI is perfectly in sync with the database.
+    // This is the most reliable way to handle the update and avoid inconsistencies.
+    await fetchData();
     setIsAddHabitGroupModalOpen(false);
   };
 
@@ -747,21 +727,13 @@ export default function App() {
     setNewHabitGroupIds([]);
   };
 
-  const handleViewGroup = (groupId: string) => {
-    setSelectedHabitGroupId(groupId);
-    setView('feed');
-    setViewingUser(null);
-  };
-
   const renderContent = () => {
     if (viewingUser && currentUser) {
-        const userJoinedHabitGroups = habitGroups.filter(hg => hg.members.some(m => m.id === viewingUser.id));
         return <Profile 
                   currentUser={currentUser}
                   viewingUser={viewingUser} 
                   habits={habits} 
                   habitLogs={habitLogs}
-                  joinedHabitGroups={userJoinedHabitGroups}
                   t={t} 
                   onOpenAddHabitModal={() => setIsAddHabitModalOpen(true)}
                   onOpenHabitLogDetail={handleOpenHabitLogDetail}
@@ -772,7 +744,6 @@ export default function App() {
                   onDeleteHabit={handleDeleteHabit}
                   onDeleteHabitLog={handleDeleteHabitLog}
                   userStats={userStats}
-                  onViewGroup={handleViewGroup}
                />;
     }
     if (!currentUser) return null; // Or a loading spinner
