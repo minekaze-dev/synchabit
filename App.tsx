@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useCallback } from 'react';
 import Sidebar from './components/Header';
 import Feed from './components/Feed';
@@ -22,7 +21,7 @@ import AuthModal from './components/AuthModal';
 import { supabase } from './supabaseClient';
 import { Session } from '@supabase/supabase-js';
 import ConfirmationModal from './components/ConfirmationModal';
-import { HABIT_CATEGORIES, DELETED_USER } from './constants';
+import { HABIT_CATEGORIES } from './constants';
 
 export type View = 'feed' | 'profile' | 'settings' | 'messages';
 export type Theme = 'light' | 'dark';
@@ -334,9 +333,12 @@ export default function App() {
         .select('*, creator:profiles(*), members:habit_group_members(profiles(*))');
 
     if (groupsData) {
-        const mappedGroups: HabitGroup[] = groupsData.map((g: any) => {
+        // FIX: Explicitly type the return value of the map function and ensure the returned object conforms to the HabitGroup type.
+        const mappedGroups: HabitGroup[] = groupsData.map((g: any): HabitGroup | null => {
              const members = g.members.map((m: any) => mapProfileToUser(m.profiles)).filter(Boolean) as User[];
-             const creator = mapProfileToUser(g.creator) || DELETED_USER;
+             const creator = mapProfileToUser(g.creator);
+             
+             if (!creator) return null;
 
              const category = HABIT_CATEGORIES.find(cat => cat.emoji === g.emoji);
              const tagName = category ? translations[language][category.translationKey] : 'General';
@@ -356,7 +358,7 @@ export default function App() {
                     text: tagName
                 }
              };
-        });
+        }).filter((g): g is HabitGroup => g !== null);
         setHabitGroups(mappedGroups);
     }
 
@@ -512,63 +514,48 @@ export default function App() {
 
     const fullDescription = data.rules ? `${data.description}\n\n**Rules:**\n${data.rules}` : data.description;
     
-    // Step 1: Insert the group. Create it as PUBLIC first to ensure we can add members before locking it down.
-    const { data: newGroupData, error: insertError } = await supabase
+    const { data: newGroupData, error } = await supabase
         .from('habit_groups')
         .insert({
             name: data.name,
             description: fullDescription,
             emoji: categoryInfo.emoji,
-            is_private: false, // Create as public first
+            is_private: data.isPrivate,
             cover_image_url: data.coverImageUrl,
             creator_id: currentUser.id
         })
-        .select('id')
+        .select()
         .single();
     
-    if (insertError || !newGroupData) {
-        console.error("Error adding habit group (step 1):", insertError?.message);
-        setIsAddHabitGroupModalOpen(false);
-        return;
-    }
-    
-    const newGroupId = newGroupData.id;
+    if (error) {
+      console.error("Error adding habit group:", error);
+    } else if (newGroupData) {
+      // Optimistically update UI for instant feedback, then refetch to ensure consistency.
+      const creator = currentUser;
+      const category = HABIT_CATEGORIES.find(cat => cat.emoji === newGroupData.emoji);
+      const tagName = category ? translations[language][category.translationKey] : 'General';
 
-    // Step 2: Add the creator as a member. Use upsert to avoid race conditions with a potential database trigger.
-    const { error: memberUpsertError } = await supabase
-        .from('habit_group_members')
-        .upsert({
-            group_id: newGroupId,
-            user_id: currentUser.id
-        });
-        
-    if (memberUpsertError) {
-        console.error("Error upserting creator to members (step 2):", memberUpsertError.message);
-        // Cleanup if adding the member fails.
-        await supabase.from('habit_groups').delete().eq('id', newGroupId);
-        setIsAddHabitGroupModalOpen(false);
-        return;
-    }
-
-    // Step 3: If the group was intended to be private, update it now.
-    if (data.isPrivate) {
-        const { error: updateError } = await supabase
-            .from('habit_groups')
-            .update({ is_private: true })
-            .eq('id', newGroupId);
-        
-        if (updateError) {
-            console.error("Error updating group to private (step 3):", updateError.message);
-            // Cleanup on failure
-            await supabase.from('habit_group_members').delete().eq('group_id', newGroupId);
-            await supabase.from('habit_groups').delete().eq('id', newGroupId);
-            setIsAddHabitGroupModalOpen(false);
-            return;
-        }
+      const newHabitGroup: HabitGroup = {
+          id: newGroupData.id,
+          name: newGroupData.name,
+          emoji: newGroupData.emoji,
+          description: newGroupData.description,
+          isPrivate: newGroupData.is_private,
+          coverImageUrl: newGroupData.cover_image_url || undefined,
+          creator: creator,
+          members: [creator],
+          memberCount: 1,
+          tag: {
+              emoji: newGroupData.emoji,
+              text: tagName
+          }
+      };
+      setHabitGroups(prev => [...prev, newHabitGroup]);
+      
+      // Fetch data in the background to sync with the database source of truth
+      fetchData();
     }
 
-    // Step 4: Refetch all data to ensure UI is in sync with the database.
-    await fetchData();
     setIsAddHabitGroupModalOpen(false);
   };
 
