@@ -11,7 +11,7 @@ interface ProfileProps {
   t: any;
   onOpenAddHabitModal: () => void;
   onOpenHabitLogDetail: (log: HabitLog) => void;
-  onOpenAddHabitLog: (habitId: string, date: number) => void;
+  onOpenAddHabitLog: (habitId: string, date: Date) => void;
   onStartConversation: (user: User) => void;
   onUpdateAvatar: (newUrl: string) => void;
   onUpdateName: (newName: string) => void;
@@ -20,6 +20,9 @@ interface ProfileProps {
   userStats: {
     checkinConsistency: number;
     maxStreak: number;
+    totalConsistentDays: number;
+    totalCheers: number;
+    totalPushes: number;
   };
 }
 
@@ -30,7 +33,8 @@ const ProgressCard: React.FC<{
     onStartConversation: (user: User) => void;
     onUpdateAvatar: (newUrl: string) => void;
     onUpdateName: (newName: string) => void;
-}> = ({ currentUser, viewingUser, t, onStartConversation, onUpdateAvatar, onUpdateName }) => {
+    stats: ProfileProps['userStats'];
+}> = ({ currentUser, viewingUser, t, onStartConversation, onUpdateAvatar, onUpdateName, stats }) => {
     const isOwnProfile = currentUser.id === viewingUser.id;
     const fileInputRef = React.useRef<HTMLInputElement>(null);
     const [isEditingName, setIsEditingName] = useState(false);
@@ -123,9 +127,9 @@ const ProgressCard: React.FC<{
                         )}
 
                         <div className="mt-4 flex justify-start items-center gap-6 text-sm font-semibold text-slate-500 dark:text-slate-400">
-                            <span>{`41 ${t.totalConsistentDays}`}</span>
-                            <span>{`15 ${t.cheers}`}</span>
-                            <span>{`3 ${t.pushes}`}</span>
+                            <span>{`${stats.totalConsistentDays} ${t.totalConsistentDays}`}</span>
+                            <span>{`${stats.totalCheers} ${t.cheers}`}</span>
+                            <span>{`${stats.totalPushes} ${t.pushes}`}</span>
                         </div>
                     </div>
                 </div>
@@ -143,19 +147,35 @@ const HabitCalendar: React.FC<{
     habit: Habit; 
     logs: HabitLog[]; 
     onOpenHabitLogDetail: (log: HabitLog) => void; 
-    onOpenAddHabitLog: (habitId: string, date: number) => void;
+    onOpenAddHabitLog: (habitId: string, date: Date) => void;
     onDeleteHabit: (habitId: string) => void;
     onDeleteHabitLog: (logId: string) => void;
     isOwnProfile: boolean;
 }> = ({ habit, logs, onOpenHabitLogDetail, onOpenAddHabitLog, onDeleteHabit, onDeleteHabitLog, isOwnProfile }) => {
+    const [displayDate, setDisplayDate] = useState(new Date());
+
     const daysOfWeek = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
-    const today = 14; 
     
-    const calendarGrid = Array.from({ length: 35 }, (_, i) => {
-        const day = i - 5;
-        return day > 0 && day <= 30 ? day : null;
-    });
+    const year = displayDate.getFullYear();
+    const month = displayDate.getMonth();
+    const monthName = displayDate.toLocaleDateString('default', { month: 'long', year: 'numeric' });
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const firstDayOfMonth = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    const calendarGrid = Array(firstDayOfMonth).fill(null).concat(Array.from({ length: daysInMonth }, (_, i) => i + 1));
     
+    const changeMonth = (offset: number) => {
+        setDisplayDate(prev => {
+            const newDate = new Date(prev);
+            newDate.setMonth(prev.getMonth() + offset);
+            return newDate;
+        });
+    };
+
     const colorClasses: { [key: string]: { bg: string, text: string, border: string, gradient: string, hover: string } } = {
         purple: { bg: 'bg-pink-200', text: 'text-pink-600', border: 'border-pink-500', gradient: 'from-purple-400 to-pink-400', hover: 'hover:bg-pink-300' },
         green: { bg: 'bg-green-200', text: 'text-green-600', border: 'border-green-500', gradient: 'from-green-400 to-teal-400', hover: 'hover:bg-green-300' },
@@ -166,11 +186,16 @@ const HabitCalendar: React.FC<{
     const colors = colorClasses[habit.color || 'green'];
 
     const handleDateClick = (day: number) => {
-        const logForDay = logs.find(log => log.habitId === habit.id && log.date === day);
+        const clickedDate = new Date(year, month, day);
+        clickedDate.setHours(0, 0, 0, 0);
+
+        const dateString = clickedDate.toISOString().split('T')[0];
+        const logForDay = logs.find(log => log.habitId === habit.id && log.date === dateString);
+
         if (logForDay) {
             onOpenHabitLogDetail(logForDay);
-        } else if (day <= today) {
-            onOpenAddHabitLog(habit.id, day);
+        } else if (clickedDate <= today) {
+            onOpenAddHabitLog(habit.id, clickedDate);
         }
     };
 
@@ -188,20 +213,24 @@ const HabitCalendar: React.FC<{
                 </div>
             </div>
             <div className="flex justify-between items-center my-3 px-2">
-                <button className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">{'<'}</button>
-                <div className="font-bold text-slate-700 dark:text-slate-300">November 2025</div>
-                <button className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">{'>'}</button>
+                <button onClick={() => changeMonth(-1)} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">{'<'}</button>
+                <div className="font-bold text-slate-700 dark:text-slate-300">{monthName}</div>
+                <button onClick={() => changeMonth(1)} className="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200">{'>'}</button>
             </div>
             <div className="grid grid-cols-7 gap-y-1 text-center">
                 {daysOfWeek.map(day => <div key={day} className="text-xs font-bold text-slate-400 dark:text-slate-500">{day}</div>)}
                 {calendarGrid.map((day, i) => {
                     if (!day) return <div key={`empty-${i}`} />;
                     
-                    const logForDay = logs.find(log => log.habitId === habit.id && log.date === day);
+                    const currentDate = new Date(year, month, day);
+                    currentDate.setHours(0, 0, 0, 0);
+                    const dateString = currentDate.toISOString().split('T')[0];
+
+                    const logForDay = logs.find(log => log.habitId === habit.id && log.date === dateString);
                     const isStreaked = !!logForDay;
-                    const isToday = day === today;
-                    const isPast = day < today;
-                    const isClickable = isStreaked || (isPast && !isStreaked);
+                    const isToday = currentDate.getTime() === today.getTime();
+                    const isPastOrToday = currentDate <= today;
+                    const isClickable = isOwnProfile && (isStreaked || (isPastOrToday && !isStreaked));
 
                     const dayClasses = `w-8 h-8 flex items-center justify-center rounded-full text-sm font-semibold mx-auto transition-colors
                         ${isToday ? `${colors.bg} ${colors.text} border-2 ${colors.border}` : ''}
@@ -336,6 +365,7 @@ const Profile: React.FC<ProfileProps> = ({
           onStartConversation={onStartConversation}
           onUpdateAvatar={onUpdateAvatar}
           onUpdateName={onUpdateName}
+          stats={userStats}
         />
 
         <div>

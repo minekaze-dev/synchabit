@@ -96,17 +96,6 @@ const HabitCard: React.FC<{
   );
 }
 
-const FloatingHearts: React.FC = () => (
-    <div className="absolute inset-0 z-0 overflow-hidden" aria-hidden="true">
-        <span className="absolute text-pink-200/50 dark:text-pink-900/50 text-5xl -top-5 left-1/4 animate-pulse">♡</span>
-        <span className="absolute text-purple-200/50 dark:text-purple-900/50 text-3xl top-1/2 -left-10 animate-pulse delay-500">♡</span>
-        <span className="absolute text-teal-200/50 dark:text-teal-900/50 text-6xl top-1/4 -right-10 animate-pulse delay-1000">♡</span>
-        <span className="absolute text-blue-200/50 dark:text-blue-900/50 text-4xl bottom-0 right-1/4 animate-pulse delay-700">♡</span>
-        <span className="absolute text-green-200/50 dark:text-green-900/50 text-2xl bottom-1/4 left-10 animate-pulse delay-300">♡</span>
-    </div>
-);
-
-
 interface FeedProps {
   habitGroups: HabitGroup[];
   t: any;
@@ -132,9 +121,8 @@ export default function Feed({ habitGroups, t, currentUser, onJoinHabitGroup, on
   };
 
   return (
-    <div className="space-y-6 relative">
-      <FloatingHearts />
-      <div className="relative z-10">
+    <div className="space-y-6">
+      <div>
         <h2 className="text-3xl font-bold text-slate-900 dark:text-slate-100">{t.exploreNewHabits}</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mt-6">
           {habitGroups.map(habitGroup => {

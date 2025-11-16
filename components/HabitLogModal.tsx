@@ -29,7 +29,7 @@ export default function HabitLogModal({ isOpen, onClose, log, habit, t, onEditLo
           <div className="flex items-center gap-4 mb-6">
             <span className="text-4xl">{habit.icon}</span>
             <div>
-              <h2 className="text-xl font-bold text-slate-800">{t.editHabitLog} - November {log.date}</h2>
+              <h2 className="text-xl font-bold text-slate-800">{t.editHabitLog} - {new Date(log.date).toLocaleDateString('default', { month: 'long', day: 'numeric', timeZone: 'UTC' })}</h2>
               <p className="text-slate-600 font-semibold">{habit.name}</p>
             </div>
           </div>

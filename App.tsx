@@ -1,5 +1,9 @@
 
 
+
+
+
+
 import React, { useState, useEffect, useCallback } from 'react';
 import Sidebar from './components/Header';
 import Feed from './components/Feed';
@@ -140,7 +144,7 @@ export default function App() {
   const [selectedHabitLog, setSelectedHabitLog] = useState<HabitLog | null>(null);
 
   const [isAddHabitLogModalOpen, setIsAddHabitLogModalOpen] = useState(false);
-  const [habitLogContext, setHabitLogContext] = useState<{ habitId: string; date: number } | null>(null);
+  const [habitLogContext, setHabitLogContext] = useState<{ habitId: string; date: Date } | null>(null);
   
   const [language, setLanguage] = useState<Language>('id');
   const [searchQuery, setSearchQuery] = useState('');
@@ -153,7 +157,13 @@ export default function App() {
   const [authModal, setAuthModal] = useState<AuthModalState>({ isOpen: false, mode: 'login' });
   const [showConfirmationModal, setShowConfirmationModal] = useState(false);
   
-  const [userStats, setUserStats] = useState({ checkinConsistency: 0, maxStreak: 0 });
+  const [userStats, setUserStats] = useState({ 
+    checkinConsistency: 0, 
+    maxStreak: 0,
+    totalConsistentDays: 0,
+    totalCheers: 0,
+    totalPushes: 0
+  });
 
   const [theme, setTheme] = useState<Theme>(() => {
     const savedTheme = localStorage.getItem('theme');
@@ -189,7 +199,7 @@ export default function App() {
             setHabits([]);
             setHabitLogs([]);
             setHabitGroups([]);
-            setUserStats({ checkinConsistency: 0, maxStreak: 0 });
+            setUserStats({ checkinConsistency: 0, maxStreak: 0, totalConsistentDays: 0, totalCheers: 0, totalPushes: 0 });
         }
         setLoading(false);
     });
@@ -197,7 +207,7 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
   
-  const calculateAndSetUserStats = useCallback((habitsWithLogs: any[]) => {
+  const calculateAndSetUserStats = useCallback((habitsWithLogs: any[], userInteractions: {cheers: number, pushes: number}) => {
       // 1. Calculate Check-in Consistency for the last 30 days
       const allLogs = habitsWithLogs.flatMap(h => h.habit_logs || []);
       let consistency = 0;
@@ -254,7 +264,17 @@ export default function App() {
               maxStreak = currentStreak;
           }
       }
-      setUserStats({ checkinConsistency: consistency, maxStreak });
+      
+      // 3. Calculate Total Consistent Days
+      const totalConsistentDays = new Set(allLogs.map(log => log.date)).size;
+
+      setUserStats({ 
+        checkinConsistency: consistency, 
+        maxStreak,
+        totalConsistentDays: totalConsistentDays,
+        totalCheers: userInteractions.cheers,
+        totalPushes: userInteractions.pushes
+      });
   }, []);
 
   const fetchData = useCallback(async () => {
@@ -266,8 +286,29 @@ export default function App() {
         .select('*, habit_logs(*)')
         .eq('user_id', currentUser.id);
 
+    let userInteractions = { cheers: 0, pushes: 0 };
+    // Fetch user's posts to calculate interactions received
+    const { data: userPosts, error: postsError } = await supabase
+        .from('posts')
+        .select('id')
+        .eq('user_id', currentUser.id);
+
+    if (userPosts && userPosts.length > 0) {
+        const postIds = userPosts.map(p => p.id);
+        const { data: interactions, error: interactionsError } = await supabase
+            .from('post_interactions')
+            .select('type')
+            .in('post_id', postIds);
+        
+        if (interactions) {
+            userInteractions.cheers = interactions.filter(i => i.type === 'support').length;
+            userInteractions.pushes = interactions.filter(i => i.type === 'push').length;
+        }
+    }
+    
+
     if (habitsData) {
-        calculateAndSetUserStats(habitsData);
+        calculateAndSetUserStats(habitsData, userInteractions);
         const mappedHabits: Habit[] = habitsData.map((h: any) => ({
             id: h.id,
             name: h.name,
@@ -277,6 +318,18 @@ export default function App() {
             streak: 0, // This is calculated in stats now
         }));
         setHabits(mappedHabits);
+
+        const allLogs = habitsData.flatMap((h: any) => h.habit_logs.map((l: any): HabitLog => ({
+            id: l.id,
+            habitId: l.habit_id,
+            date: l.date,
+            note: l.note,
+        })));
+        setHabitLogs(allLogs);
+    } else {
+        calculateAndSetUserStats([], userInteractions);
+        setHabits([]);
+        setHabitLogs([]);
     }
     
     // Fetch habit groups
@@ -285,10 +338,13 @@ export default function App() {
         .select('*, creator:profiles(*), members:habit_group_members(profiles(*))');
 
     if (groupsData) {
-        const mappedGroups: HabitGroup[] = groupsData.map((g: any) => {
+        // FIX: Explicitly type the return value of the map function and ensure the returned object conforms to the HabitGroup type.
+        const mappedGroups: HabitGroup[] = groupsData.map((g: any): HabitGroup | null => {
              const members = g.members.map((m: any) => mapProfileToUser(m.profiles)).filter(Boolean) as User[];
              const creator = mapProfileToUser(g.creator);
              
+             if (!creator) return null;
+
              const category = HABIT_CATEGORIES.find(cat => cat.emoji === g.emoji);
              const tagName = category ? translations[language][category.translationKey] : 'General';
 
@@ -298,16 +354,16 @@ export default function App() {
                 emoji: g.emoji,
                 description: g.description,
                 isPrivate: g.is_private,
-                coverImageUrl: g.cover_image_url,
-                creator: creator!,
+                coverImageUrl: g.cover_image_url || undefined,
+                creator: creator,
                 members: members,
                 memberCount: members.length,
                 tag: {
                     emoji: g.emoji,
                     text: tagName
                 }
-             }
-        }).filter(g => g.creator);
+             };
+        }).filter((g): g is HabitGroup => g !== null);
         setHabitGroups(mappedGroups);
     }
 
@@ -476,26 +532,11 @@ export default function App() {
         .select()
         .single();
     
-    if (newGroupData) {
-        const tagName = categoryInfo ? translations[language][categoryInfo.translationKey] : 'General';
-        const newHabitGroup: HabitGroup = {
-            id: newGroupData.id,
-            name: newGroupData.name,
-            emoji: newGroupData.emoji,
-            description: newGroupData.description,
-            isPrivate: newGroupData.is_private,
-            coverImageUrl: newGroupData.cover_image_url,
-            creator: currentUser,
-            members: [currentUser],
-            memberCount: 1,
-            tag: {
-                emoji: newGroupData.emoji,
-                text: tagName,
-            },
-        };
-        setHabitGroups(prev => [...prev, newHabitGroup]);
+    if (error) {
+      console.error("Error adding habit group:", error);
+    } else if (newGroupData) {
+      await fetchData();
     }
-    if (error) console.error("Error adding habit group:", error);
 
     setIsAddHabitGroupModalOpen(false);
   };
@@ -529,8 +570,23 @@ export default function App() {
     setManagingHabitGroup(prev => prev ? {...prev, ...updates} : null);
   };
 
-  const handleDeleteHabitGroup = (habitGroupId: string) => {
-    // Supabase logic here
+  const handleDeleteHabitGroup = async (habitGroupId: string) => {
+    if (!currentUser) return;
+    const { error } = await supabase
+        .from('habit_groups')
+        .delete()
+        .eq('id', habitGroupId);
+
+    if (error) {
+        console.error("Error deleting habit group:", error);
+    } else {
+        await fetchData();
+        if (selectedHabitGroupId === habitGroupId) {
+            setSelectedHabitGroupId(null);
+        }
+    }
+    setIsManagementModalOpen(false);
+    setManagingHabitGroup(null);
   };
 
   const handleRemoveMember = (habitGroupId: string, memberId: string) => {
@@ -542,17 +598,48 @@ export default function App() {
     setIsHabitLogDetailModalOpen(true);
   };
   
-  const handleOpenAddHabitLog = (habitId: string, date: number) => {
+  const handleOpenAddHabitLog = (habitId: string, date: Date) => {
     setHabitLogContext({ habitId, date });
     setIsAddHabitLogModalOpen(true);
   };
 
-  const handleAddHabitLog = (note: string) => {
-    // Supabase logic here
+  const handleAddHabitLog = async (note: string) => {
+    if (!currentUser || !habitLogContext) return;
+
+    const dateString = habitLogContext.date.toISOString().split('T')[0];
+
+    const { error } = await supabase
+      .from('habit_logs')
+      .insert({
+        habit_id: habitLogContext.habitId,
+        date: dateString,
+        note: note
+      });
+
+    if (error) {
+        console.error("Error adding habit log:", error);
+    } else {
+        await fetchData();
+    }
+    
+    setIsAddHabitLogModalOpen(false);
+    setHabitLogContext(null);
   };
   
-  const handleEditHabitLog = (logId: string, newNote: string) => {
-    // Supabase logic here
+  const handleEditHabitLog = async (logId: string, newNote: string) => {
+    const { data, error } = await supabase
+        .from('habit_logs')
+        .update({ note: newNote })
+        .eq('id', logId)
+        .select()
+        .single();
+    
+    if (error) {
+        console.error("Error editing habit log:", error);
+    } else if (data) {
+        setHabitLogs(prev => prev.map(log => log.id === logId ? { ...log, note: data.note } : log));
+    }
+    setIsHabitLogDetailModalOpen(false);
   };
 
   const handleUpdateAvatar = async (newAvatarUrl: string) => {
@@ -591,12 +678,35 @@ export default function App() {
     if (error) console.error("Error updating name:", error);
   };
 
-  const handleDeleteHabit = (habitId: string) => {
-    // Supabase logic here
+  const handleDeleteHabit = async (habitId: string) => {
+    if (!currentUser) return;
+    if (window.confirm(t.deleteHabitConfirmation)) {
+        const { error } = await supabase
+            .from('habits')
+            .delete()
+            .eq('id', habitId);
+        
+        if (error) {
+            console.error("Error deleting habit:", error);
+        } else {
+            await fetchData();
+        }
+    }
   };
 
-  const handleDeleteHabitLog = (logId: string) => {
-    // Supabase logic here
+  const handleDeleteHabitLog = async (logId: string) => {
+    if (window.confirm(t.deleteHabitLogConfirmation)) {
+        const { error } = await supabase
+            .from('habit_logs')
+            .delete()
+            .eq('id', logId);
+        
+        if (error) {
+            console.error("Error deleting habit log:", error);
+        } else {
+            await fetchData();
+        }
+    }
   };
   
   const handleClearNewHabitGroupNotifications = () => {
