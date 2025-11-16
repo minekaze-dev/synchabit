@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { User, Habit, StreakAchievement, HabitLog } from '../types';
-import { STREAK_ACHIEVEMENTS, HABIT_1_STREAK_DATES, HABIT_2_STREAK_DATES, HABIT_LOGS } from '../constants';
 import Avatar from './Avatar';
 import Icon from './Icon';
 
@@ -273,24 +272,34 @@ const InteractionStatsCard: React.FC<{t: any}> = ({t}) => {
     );
 };
 
-const AchievementsCard: React.FC<{t: any}> = ({t}) => (
-    <div className="bg-white dark:bg-slate-900/70 p-5 rounded-xl shadow-sm">
-        <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-4">{t.badgesAndAchievements}</h3>
-        <div className="space-y-3">
-            {STREAK_ACHIEVEMENTS.map(ach => (
-                <div key={ach.id} className={`flex items-center p-3 rounded-lg ${ach.earned ? 'bg-amber-100 dark:bg-amber-900/40' : 'bg-slate-100 dark:bg-slate-800'}`}>
-                    <span className="text-2xl mr-3">{ach.earned ? '🏆' : '🔒'}</span>
-                    <div className="flex-grow">
-                        <p className={`font-bold ${ach.earned ? 'text-amber-800 dark:text-amber-300' : 'text-slate-600 dark:text-slate-300'}`}>{ach.name}</p>
-                        <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 mt-1">
-                            <div className="bg-amber-400 h-1.5 rounded-full" style={{width: ach.earned ? '100%' : '50%'}}></div>
+// FIX: The STREAK_ACHIEVEMENTS constant was previously imported but is not available in `constants.ts`.
+// It's now defined locally within the component. This resolves the import error and allows for translation of achievement names using the `t` prop.
+const AchievementsCard: React.FC<{t: any}> = ({t}) => {
+    const STREAK_ACHIEVEMENTS: StreakAchievement[] = [
+        { id: '1', name: t.streak30Days, days: 30, earned: true },
+        { id: '2', name: t.streak120Days, days: 120, earned: true },
+        { id: '3', name: t.streak180Days, days: 180, earned: false },
+        { id: '4', name: t.streak365Days, days: 365, earned: false },
+    ];
+    return (
+        <div className="bg-white dark:bg-slate-900/70 p-5 rounded-xl shadow-sm">
+            <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-4">{t.badgesAndAchievements}</h3>
+            <div className="space-y-3">
+                {STREAK_ACHIEVEMENTS.map(ach => (
+                    <div key={ach.id} className={`flex items-center p-3 rounded-lg ${ach.earned ? 'bg-amber-100 dark:bg-amber-900/40' : 'bg-slate-100 dark:bg-slate-800'}`}>
+                        <span className="text-2xl mr-3">{ach.earned ? '🏆' : '🔒'}</span>
+                        <div className="flex-grow">
+                            <p className={`font-bold ${ach.earned ? 'text-amber-800 dark:text-amber-300' : 'text-slate-600 dark:text-slate-300'}`}>{ach.name}</p>
+                            <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 mt-1">
+                                <div className="bg-amber-400 h-1.5 rounded-full" style={{width: ach.earned ? '100%' : '50%'}}></div>
+                            </div>
                         </div>
                     </div>
-                </div>
-            ))}
+                ))}
+            </div>
         </div>
-    </div>
-);
+    );
+};
 
 const Profile: React.FC<ProfileProps> = ({
   currentUser,

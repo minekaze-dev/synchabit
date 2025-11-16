@@ -8,7 +8,9 @@ interface AuthModalProps {
   onClose: () => void;
   mode: AuthMode;
   onSwitchMode: (mode: AuthMode) => void;
-  onLogin: (email: string, pass: string) => boolean;
+  onLogin: (email: string, pass: string) => Promise<string | null>;
+  onRegister: (fullName: string, email: string, pass: string) => Promise<string | null>;
+  onForgotPassword: (email: string) => Promise<string | null>;
   t: any;
 }
 
@@ -27,25 +29,42 @@ const AuthInput: React.FC<{ id: string; type: string; placeholder: string; value
     </div>
 );
 
-export default function AuthModal({ isOpen, onClose, mode, onSwitchMode, onLogin, t }: AuthModalProps) {
+export default function AuthModal({ isOpen, onClose, mode, onSwitchMode, onLogin, onRegister, onForgotPassword, t }: AuthModalProps) {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
+  
+  const handleClose = () => {
+      // Reset state on close
+      setFullName('');
+      setEmail('');
+      setPassword('');
+      setError(null);
+      setLoading(false);
+      onClose();
+  }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
+      setLoading(true);
+      setError(null);
+      let err = null;
       if (mode === 'login') {
-        onLogin(email, password);
+        err = await onLogin(email, password);
       } else if (mode === 'register') {
-        // Handle registration logic
-        alert('Registration feature coming soon!');
+        err = await onRegister(fullName, email, password);
       } else {
-        // Handle forgot password logic
-        alert('Password reset link sent (not really)!');
+        err = await onForgotPassword(email);
       }
+      if (err) {
+        setError(err);
+      }
+      setLoading(false);
   };
 
   const getTitle = () => {
@@ -65,10 +84,10 @@ export default function AuthModal({ isOpen, onClose, mode, onSwitchMode, onLogin
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4" onClick={handleClose}>
       <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
         <form onSubmit={handleSubmit} className="p-8 relative">
-          <button type="button" onClick={onClose} className="absolute top-4 right-4 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 text-2xl font-light">&times;</button>
+          <button type="button" onClick={handleClose} className="absolute top-4 right-4 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 text-2xl font-light">&times;</button>
           
           <div className="text-center mb-8">
             <h2 className="text-3xl font-bold text-slate-800 dark:text-slate-100">{getTitle()}</h2>
@@ -80,6 +99,8 @@ export default function AuthModal({ isOpen, onClose, mode, onSwitchMode, onLogin
           </div>
           
           <div className="space-y-4">
+            {error && <p className="text-red-500 text-sm text-center bg-red-100 dark:bg-red-900/30 p-2 rounded-md">{error}</p>}
+
             {mode === 'register' && (
                 <AuthInput 
                     id="fullName"
@@ -122,8 +143,8 @@ export default function AuthModal({ isOpen, onClose, mode, onSwitchMode, onLogin
                 </div>
             )}
 
-            <button type="submit" className="w-full py-3.5 rounded-lg bg-brand-teal-600 text-white font-bold hover:bg-brand-teal-700 transition-colors shadow-lg">
-                {getButtonText()}
+            <button type="submit" disabled={loading} className="w-full py-3.5 rounded-lg bg-brand-teal-600 text-white font-bold hover:bg-brand-teal-700 transition-colors shadow-lg disabled:bg-brand-teal-400 disabled:cursor-not-allowed flex items-center justify-center">
+                {loading ? <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div> : getButtonText()}
             </button>
           </div>
         </form>

@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Header';
 import Feed from './components/Feed';
 import Profile from './components/Dashboard';
-import { Post, Habit, User, Badge, Challenge, HabitGroup, HabitLog, Conversation, Notification, Comment } from './types';
-import { INITIAL_POSTS, INITIAL_HABITS, CURRENT_USER as INITIAL_CURRENT_USER, BADGES, CHALLENGES, HABIT_GROUPS, HABIT_LOGS, CONVERSATIONS, INITIAL_NOTIFICATIONS, DUMMY_USER } from './constants';
+import { Post, Habit, User, HabitGroup, HabitLog, Conversation, Notification, Comment } from './types';
 import AddHabitModal from './components/AddHabitModal';
 import { translations, Language } from './translations';
 import Settings from './components/Settings';
@@ -18,6 +17,9 @@ import NotificationDropdown from './components/NotificationDropdown';
 import HabitGroupManagementModal from './components/HabitGroupManagementModal';
 import LandingPage from './components/LandingPage';
 import AuthModal from './components/AuthModal';
+import { supabase } from './supabaseClient';
+import { Session } from '@supabase/supabase-js';
+import ConfirmationModal from './components/ConfirmationModal';
 
 export type View = 'feed' | 'profile' | 'settings' | 'messages';
 export type Theme = 'light' | 'dark';
@@ -98,15 +100,17 @@ const TopBar: React.FC<{
 
 
 export default function App() {
-  const [authUser, setAuthUser] = useState<User | null>(null);
-  const [currentUser, setCurrentUser] = useState<User>(INITIAL_CURRENT_USER);
+  const [session, setSession] = useState<Session | null>(null);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
   const [currentView, setView] = useState<View>('feed');
-  const [posts, setPosts] = useState<Post[]>(INITIAL_POSTS);
-  const [habits, setHabits] = useState<Habit[]>(INITIAL_HABITS);
-  const [habitLogs, setHabitLogs] = useState<HabitLog[]>(HABIT_LOGS);
-  const [habitGroups, setHabitGroups] = useState<HabitGroup[]>(HABIT_GROUPS);
-  const [conversations, setConversations] = useState<Conversation[]>(CONVERSATIONS);
-  const [notifications, setNotifications] = useState<Notification[]>(INITIAL_NOTIFICATIONS);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [habits, setHabits] = useState<Habit[]>([]);
+  const [habitLogs, setHabitLogs] = useState<HabitLog[]>([]);
+  const [habitGroups, setHabitGroups] = useState<HabitGroup[]>([]);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   
   const [selectedHabitGroupId, setSelectedHabitGroupId] = useState<string | null>(null);
@@ -132,6 +136,7 @@ export default function App() {
   const [newHabitGroupIds, setNewHabitGroupIds] = useState<string[]>([]);
 
   const [authModal, setAuthModal] = useState<AuthModalState>({ isOpen: false, mode: 'login' });
+  const [showConfirmationModal, setShowConfirmationModal] = useState(false);
   
   const [theme, setTheme] = useState<Theme>(() => {
     const savedTheme = localStorage.getItem('theme');
@@ -150,39 +155,113 @@ export default function App() {
     }
     localStorage.setItem('theme', theme);
   }, [theme]);
+  
+  // Auth listener
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session)
+      setLoading(false)
+    })
 
-  const [hasUnreadMessages, setHasUnreadMessages] = useState(() => {
-    return CONVERSATIONS.some(conv => {
-        if (conv.messages.length === 0) return false;
-        const lastMessage = conv.messages[conv.messages.length - 1];
-        return lastMessage.senderId !== INITIAL_CURRENT_USER.id;
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        setSession(session);
+        if (!session) {
+            setCurrentUser(null);
+            // Clear all data
+            setPosts([]);
+            setHabits([]);
+            setHabitLogs([]);
+            setHabitGroups([]);
+        }
+        setLoading(false);
     });
-  });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // Fetch user profile and data after session is set
+  useEffect(() => {
+    if (session) {
+      // Fetch user profile
+      supabase.from('profiles').select('*').eq('id', session.user.id).single().then(({data}) => {
+          if (data) {
+              const userProfile: User = {
+                  id: data.id,
+                  name: data.name,
+                  avatarUrl: data.avatar_url,
+                  bio: data.bio,
+                  memberSince: new Date(data.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+              };
+              setCurrentUser(userProfile);
+              // Fetch other data
+          }
+      });
+    }
+  }, [session]);
+
+
+  const [hasUnreadMessages, setHasUnreadMessages] = useState(false); // Placeholder
 
   const t = translations[language];
   const unreadNotificationCount = notifications.filter(n => !n.isRead).length;
-  const myHabitGroupIds = habitGroups.filter(h => h.members.some(m => m.id === currentUser.id) || h.creator.id === currentUser.id).map(h => h.id);
-  const pendingJoinRequestIds = joinRequests.filter(r => r.userId === currentUser.id).map(r => r.habitGroupId);
+  
+  // These need to be recalculated with real data
+  const myHabitGroupIds: string[] = []; 
+  const pendingJoinRequestIds: string[] = [];
 
-  const handleLogin = (email: string, pass: string): boolean => {
-    if (email === DUMMY_USER.email && pass === DUMMY_USER.password) {
-      setAuthUser(DUMMY_USER.user);
-      setCurrentUser(DUMMY_USER.user);
-      setAuthModal({ isOpen: false, mode: 'login' });
-      return true;
+  const handleLogin = async (email: string, pass: string): Promise<string | null> => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
+    if (error) {
+      alert(error.message);
+      return error.message;
     }
-    alert("Invalid credentials!");
-    return false;
+    setAuthModal({ isOpen: false, mode: 'login' });
+    return null;
+  };
+  
+  const handleRegister = async (fullName: string, email: string, pass: string): Promise<string | null> => {
+    const { error } = await supabase.auth.signUp({ 
+        email, 
+        password: pass,
+        options: {
+            data: {
+                name: fullName,
+                avatar_url: `https://i.pravatar.cc/150?u=${email}` // Default avatar
+            }
+        }
+    });
+     if (error) {
+      alert(error.message);
+      return error.message;
+    }
+    setAuthModal({ isOpen: false, mode: 'register'});
+    setShowConfirmationModal(true);
+    return null;
   };
 
-  const handleLogout = () => {
-    setAuthUser(null);
+  const handleForgotPassword = async (email: string): Promise<string | null> => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin, // URL to redirect to after password reset
+    });
+    if (error) {
+        alert(error.message);
+        return error.message;
+    }
+    alert('Password reset link sent! Please check your email.');
+    setAuthModal({isOpen: false, mode: 'forgot'});
+    return null;
+  };
+
+
+  const handleLogout = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) console.error('Error logging out:', error.message);
   };
 
   const setCurrentView = (view: View, user: User | null = null) => {
     setView(view);
-    if (view === 'profile') {
-        setViewingUser(user || currentUser);
+    if (view === 'profile' && user) {
+        setViewingUser(user);
     } else {
         setViewingUser(null);
     }
@@ -219,135 +298,37 @@ export default function App() {
   };
 
   const handleAddHabit = (newHabit: Omit<Habit, 'id' | 'streak'>) => {
-    const habitToAdd: Habit = {
-      ...newHabit,
-      id: `habit-${Date.now()}`,
-      streak: 0,
-      color: ['purple', 'green', 'blue', 'pink'][Math.floor(Math.random() * 4)],
-    };
-    setHabits(prev => [habitToAdd, ...prev]);
+    // Supabase logic here
     setIsAddHabitModalOpen(false);
   };
   
   const handleAddHabitGroup = (data: { name: string, description: string, category: string, rules: string, isPrivate: boolean, coverImageUrl?: string }) => {
-    const newHabitGroup: HabitGroup = {
-        id: `huddle-${Date.now()}`,
-        name: data.name,
-        emoji: '🆕',
-        description: data.description,
-        memberCount: 1,
-        members: [],
-        tag: { emoji: '🏷️', text: data.category },
-        color: ['teal', 'purple', 'blue', 'green', 'yellow', 'pink'][Math.floor(Math.random() * 6)],
-        creator: currentUser,
-        isPrivate: data.isPrivate,
-        coverImageUrl: data.coverImageUrl,
-    };
-    setHabitGroups(prev => [newHabitGroup, ...prev]);
-    setNewHabitGroupIds(prev => [...prev, newHabitGroup.id]);
+    // Supabase logic here
     setIsAddHabitGroupModalOpen(false);
   };
 
   const handleAddPost = (habitGroupId: string, note: string, imageUrl?: string) => {
-    const newPost: Post = {
-      id: `post-${Date.now()}`,
-      user: currentUser,
-      habitGroupId,
-      timestamp: new Date(),
-      note,
-      imageUrl,
-      supports: 0,
-      supportedBy: [],
-      pushes: 0,
-      pushedBy: [],
-      comments: [],
-      streak: Math.floor(Math.random() * 20) + 1,
-    };
-    setPosts(prev => [newPost, ...prev]);
+    // Supabase logic here
   };
   
   const handlePostInteraction = (postId: string, interactionType: 'support' | 'push') => {
-    setPosts(prevPosts => prevPosts.map(post => {
-      if (post.id === postId) {
-        const newPost = { ...post };
-        const userId = currentUser.id;
-        
-        newPost.supportedBy = [...(newPost.supportedBy || [])];
-        newPost.pushedBy = [...(newPost.pushedBy || [])];
-        
-        const hasSupported = newPost.supportedBy.includes(userId);
-        const hasPushed = newPost.pushedBy.includes(userId);
-
-        if (interactionType === 'support') {
-          if (hasSupported) {
-            newPost.supports--;
-            newPost.supportedBy = newPost.supportedBy.filter(id => id !== userId);
-          } else {
-            newPost.supports++;
-            newPost.supportedBy.push(userId);
-            if (hasPushed) {
-              newPost.pushes--;
-              newPost.pushedBy = newPost.pushedBy.filter(id => id !== userId);
-            }
-          }
-        } else if (interactionType === 'push') {
-          if (hasPushed) {
-            newPost.pushes--;
-            newPost.pushedBy = newPost.pushedBy.filter(id => id !== userId);
-          } else {
-            newPost.pushes++;
-            newPost.pushedBy.push(userId);
-            if (hasSupported) {
-              newPost.supports--;
-              newPost.supportedBy = newPost.supportedBy.filter(id => id !== userId);
-            }
-          }
-        }
-        return newPost;
-      }
-      return post;
-    }));
+    // Supabase logic here
   };
   
   const handleAddComment = (postId: string, commentText: string) => {
-    if (!commentText.trim()) return;
-    const newComment: Comment = {
-      user: currentUser,
-      text: commentText.trim(),
-      timestamp: new Date(),
-    };
-    setPosts(posts.map(p => 
-      p.id === postId ? { ...p, comments: [...p.comments, newComment] } : p
-    ));
+    // Supabase logic here
   };
 
   const handleJoinHabitGroup = (habitGroupId: string) => {
-    setHabitGroups(habitGroups.map(h => h.id === habitGroupId ? { ...h, members: [...h.members, currentUser], memberCount: h.memberCount + 1 } : h));
+    // Supabase logic here
   };
   
   const handleRequestToJoinHabitGroup = (habitGroupId: string) => {
-    const habitGroup = habitGroups.find(h => h.id === habitGroupId);
-    if (!habitGroup) return;
-    setJoinRequests(prev => [...prev, { userId: currentUser.id, habitGroupId }]);
-    
-    const newNotification: Notification = {
-      id: `notif-${Date.now()}`,
-      type: 'join_request',
-      actor: currentUser,
-      timestamp: new Date(),
-      isRead: false,
-      target: { type: 'habit_group', id: habitGroupId }
-    };
-    setNotifications(prev => [newNotification, ...prev]);
+    // Supabase logic here
   };
   
   const handleJoinRequestResponse = (notification: Notification, accept: boolean) => {
-    if (accept) {
-        const habitGroupId = notification.target.id;
-        setHabitGroups(prev => prev.map(h => h.id === habitGroupId ? { ...h, members: [...h.members, notification.actor], memberCount: h.memberCount + 1 } : h));
-    }
-    setJoinRequests(prev => prev.filter(r => !(r.userId === notification.actor.id && r.habitGroupId === notification.target.id)));
-    setNotifications(prev => prev.filter(n => n.id !== notification.id));
+    // Supabase logic here
   };
 
   const handleUpdateHabitGroup = (habitGroupId: string, updates: Partial<HabitGroup>) => {
@@ -356,26 +337,11 @@ export default function App() {
   };
 
   const handleDeleteHabitGroup = (habitGroupId: string) => {
-    setHabitGroups(prev => prev.filter(h => h.id !== habitGroupId));
-    if (selectedHabitGroupId === habitGroupId) {
-        setSelectedHabitGroupId(null);
-        setView('feed');
-    }
-    setIsManagementModalOpen(false);
-    setManagingHabitGroup(null);
+    // Supabase logic here
   };
 
   const handleRemoveMember = (habitGroupId: string, memberId: string) => {
-    setHabitGroups(prev => prev.map(h => {
-        if (h.id === habitGroupId) {
-            return {
-                ...h,
-                members: h.members.filter(m => m.id !== memberId),
-                memberCount: h.memberCount -1,
-            };
-        }
-        return h;
-    }));
+    // Supabase logic here
   };
 
   const handleOpenHabitLogDetail = (log: HabitLog) => {
@@ -389,48 +355,27 @@ export default function App() {
   };
 
   const handleAddHabitLog = (note: string) => {
-    if (!habitLogContext) return;
-    const newLog: HabitLog = {
-      id: `log-${Date.now()}`,
-      habitId: habitLogContext.habitId,
-      date: habitLogContext.date,
-      note,
-    };
-    setHabitLogs(prev => [...prev, newLog]);
-    setIsAddHabitLogModalOpen(false);
-    setHabitLogContext(null);
+    // Supabase logic here
   };
   
   const handleEditHabitLog = (logId: string, newNote: string) => {
-    setHabitLogs(prevLogs => 
-      prevLogs.map(log => 
-        log.id === logId ? { ...log, note: newNote } : log
-      )
-    );
-    setIsHabitLogDetailModalOpen(false);
+    // Supabase logic here
   };
 
   const handleUpdateAvatar = (newAvatarUrl: string) => {
-    setCurrentUser(prevUser => ({ ...prevUser, avatarUrl: newAvatarUrl }));
-    setViewingUser(prevUser => (prevUser?.id === currentUser.id ? { ...prevUser, avatarUrl: newAvatarUrl } : prevUser));
+    // Supabase logic here
   };
   
   const handleUpdateUserName = (newName: string) => {
-    setCurrentUser(prev => ({...prev, name: newName }));
-    setViewingUser(prev => (prev?.id === currentUser.id ? {...prev, name: newName} : prev));
+    // Supabase logic here
   };
 
   const handleDeleteHabit = (habitId: string) => {
-    if (window.confirm(t.deleteHabitConfirmation)) {
-      setHabits(prev => prev.filter(h => h.id !== habitId));
-      setHabitLogs(prev => prev.filter(l => l.habitId !== habitId));
-    }
+    // Supabase logic here
   };
 
   const handleDeleteHabitLog = (logId: string) => {
-    if (window.confirm(t.deleteHabitLogConfirmation)) {
-      setHabitLogs(prev => prev.filter(l => l.id !== logId));
-    }
+    // Supabase logic here
   };
   
   const handleClearNewHabitGroupNotifications = () => {
@@ -438,7 +383,7 @@ export default function App() {
   };
 
   const renderContent = () => {
-    if (viewingUser) {
+    if (viewingUser && currentUser) {
         return <Profile 
                   currentUser={currentUser}
                   viewingUser={viewingUser} 
@@ -455,6 +400,7 @@ export default function App() {
                   onDeleteHabitLog={handleDeleteHabitLog}
                />;
     }
+    if (!currentUser) return null; // Or a loading spinner
 
     switch (currentView) {
       case 'messages':
@@ -482,7 +428,15 @@ export default function App() {
   const isHabitGroupView = currentView === 'feed' && !!selectedHabitGroupId;
   const mainOverflowClass = isHabitGroupView ? 'overflow-hidden' : 'overflow-y-auto';
   
-  if (!authUser) {
+  if (loading) {
+    return (
+        <div className="min-h-screen font-sans flex items-center justify-center bg-slate-50 dark:bg-slate-950">
+            <p>Loading...</p>
+        </div>
+    );
+  }
+
+  if (!session) {
     return (
       <>
         <LandingPage 
@@ -497,9 +451,28 @@ export default function App() {
           onClose={() => setAuthModal({ ...authModal, isOpen: false })}
           onSwitchMode={(mode) => setAuthModal({ isOpen: true, mode })}
           onLogin={handleLogin}
+          onRegister={handleRegister}
+          onForgotPassword={handleForgotPassword}
+          t={t}
+        />
+        <ConfirmationModal
+          isOpen={showConfirmationModal}
+          onClose={() => setShowConfirmationModal(false)}
+          onGoToLogin={() => {
+            setShowConfirmationModal(false);
+            setAuthModal({ isOpen: true, mode: 'login'});
+          }}
           t={t}
         />
       </>
+    );
+  }
+
+  if (!currentUser) {
+     return (
+        <div className="min-h-screen font-sans flex items-center justify-center bg-slate-50 dark:bg-slate-950">
+            <p>Loading user profile...</p>
+        </div>
     );
   }
 
