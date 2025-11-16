@@ -1,9 +1,4 @@
 
-
-
-
-
-
 import React, { useState, useEffect, useCallback } from 'react';
 import Sidebar from './components/Header';
 import Feed from './components/Feed';
@@ -535,7 +530,30 @@ export default function App() {
     if (error) {
       console.error("Error adding habit group:", error);
     } else if (newGroupData) {
-      await fetchData();
+      // Optimistically update UI for instant feedback, then refetch to ensure consistency.
+      const creator = currentUser;
+      const category = HABIT_CATEGORIES.find(cat => cat.emoji === newGroupData.emoji);
+      const tagName = category ? translations[language][category.translationKey] : 'General';
+
+      const newHabitGroup: HabitGroup = {
+          id: newGroupData.id,
+          name: newGroupData.name,
+          emoji: newGroupData.emoji,
+          description: newGroupData.description,
+          isPrivate: newGroupData.is_private,
+          coverImageUrl: newGroupData.cover_image_url || undefined,
+          creator: creator,
+          members: [creator],
+          memberCount: 1,
+          tag: {
+              emoji: newGroupData.emoji,
+              text: tagName
+          }
+      };
+      setHabitGroups(prev => [...prev, newHabitGroup]);
+      
+      // Fetch data in the background to sync with the database source of truth
+      fetchData();
     }
 
     setIsAddHabitGroupModalOpen(false);
