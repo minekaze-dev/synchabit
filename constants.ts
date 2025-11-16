@@ -8,6 +8,15 @@ export const CURRENT_USER: User = {
   bio: 'Consistency is key!'
 };
 
+export const DELETED_USER: User = {
+  id: 'deleted-user',
+  name: 'Deleted User',
+  avatarUrl: '',
+  memberSince: '',
+  bio: 'This user no longer exists.'
+};
+
+
 export const ENCOURAGEMENT_TEMPLATES: string[] = [
     "Great job!",
     "Keep up the fantastic work!",
