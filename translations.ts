@@ -183,6 +183,9 @@ export const translations = {
     featureTag3: 'Need Friends',
     copyright: '© 2025 Synchabit',
     terms: 'Terms',
+    confirmYourEmailTitle: 'Confirm your email',
+    confirmYourEmailBody: "We've sent a confirmation link to your email address. Please check your inbox (and spam folder!) to complete your registration.",
+    backToLogin: 'Back to Login',
 
     // Notifications
     notifications: 'Notifications',
@@ -380,6 +383,9 @@ export const translations = {
     featureTag3: 'Butuh Teman',
     copyright: '© 2025 Synchabit',
     terms: 'Ketentuan',
+    confirmYourEmailTitle: 'Konfirmasi email Anda',
+    confirmYourEmailBody: 'Kami telah mengirimkan tautan konfirmasi ke alamat email Anda. Silakan periksa kotak masuk (dan folder spam!) Anda untuk menyelesaikan pendaftaran.',
+    backToLogin: 'Kembali ke Halaman Masuk',
     
     // Notifications
     notifications: 'Notifikasi',

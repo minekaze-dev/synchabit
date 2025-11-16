@@ -153,6 +153,8 @@ export default function App() {
   const [authModal, setAuthModal] = useState<AuthModalState>({ isOpen: false, mode: 'login' });
   const [showConfirmationModal, setShowConfirmationModal] = useState(false);
   
+  const [userStats, setUserStats] = useState({ checkinConsistency: 0, maxStreak: 0 });
+
   const [theme, setTheme] = useState<Theme>(() => {
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme) {
@@ -187,30 +189,92 @@ export default function App() {
             setHabits([]);
             setHabitLogs([]);
             setHabitGroups([]);
+            setUserStats({ checkinConsistency: 0, maxStreak: 0 });
         }
         setLoading(false);
     });
 
     return () => subscription.unsubscribe();
   }, []);
+  
+  const calculateAndSetUserStats = useCallback((habitsWithLogs: any[]) => {
+      // 1. Calculate Check-in Consistency for the last 30 days
+      const allLogs = habitsWithLogs.flatMap(h => h.habit_logs || []);
+      let consistency = 0;
+      if (allLogs.length > 0) {
+          const thirtyDaysAgo = new Date();
+          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+          
+          const uniqueDaysInLast30 = new Set(
+              allLogs
+                  .map(log => new Date(log.date))
+                  .filter(date => date >= thirtyDaysAgo)
+                  .map(date => date.toISOString().split('T')[0])
+          ).size;
+          consistency = Math.round((uniqueDaysInLast30 / 30) * 100);
+      }
+
+      // 2. Calculate Max Streak
+      let maxStreak = 0;
+      for (const habit of habitsWithLogs) {
+          const logs = habit.habit_logs || [];
+          if (logs.length === 0) continue;
+
+          const logDates = new Set(logs.map((log: any) => log.date));
+          let currentStreak = 0;
+          
+          const sortedDates = Array.from(logDates).sort((a, b) => new Date(b as string).getTime() - new Date(a as string).getTime());
+          
+          const today = new Date();
+          today.setHours(0,0,0,0);
+          const yesterday = new Date(today);
+          yesterday.setDate(yesterday.getDate() - 1);
+
+          const latestLogDate = new Date(sortedDates[0] as string);
+          latestLogDate.setHours(0,0,0,0);
+          
+          if (latestLogDate.getTime() === today.getTime() || latestLogDate.getTime() === yesterday.getTime()) {
+              currentStreak = 1;
+              let lastDate = latestLogDate;
+              for (let i = 1; i < sortedDates.length; i++) {
+                  const currentDate = new Date(sortedDates[i] as string);
+                  currentDate.setHours(0,0,0,0);
+                  const expectedPreviousDate = new Date(lastDate);
+                  expectedPreviousDate.setDate(expectedPreviousDate.getDate() - 1);
+                  
+                  if (currentDate.getTime() === expectedPreviousDate.getTime()) {
+                      currentStreak++;
+                      lastDate = currentDate;
+                  } else {
+                      break;
+                  }
+              }
+          }
+          if (currentStreak > maxStreak) {
+              maxStreak = currentStreak;
+          }
+      }
+      setUserStats({ checkinConsistency: consistency, maxStreak });
+  }, []);
 
   const fetchData = useCallback(async () => {
     if (!currentUser) return;
 
-    // Fetch personal habits
+    // Fetch personal habits with their logs
     const { data: habitsData, error: habitsError } = await supabase
         .from('habits')
-        .select('*')
+        .select('*, habit_logs(*)')
         .eq('user_id', currentUser.id);
 
     if (habitsData) {
+        calculateAndSetUserStats(habitsData);
         const mappedHabits: Habit[] = habitsData.map((h: any) => ({
             id: h.id,
             name: h.name,
             icon: h.icon,
             frequency: h.frequency,
             color: h.color,
-            streak: 0, // Needs calculation
+            streak: 0, // This is calculated in stats now
         }));
         setHabits(mappedHabits);
     }
@@ -225,7 +289,6 @@ export default function App() {
              const members = g.members.map((m: any) => mapProfileToUser(m.profiles)).filter(Boolean) as User[];
              const creator = mapProfileToUser(g.creator);
              
-             // Find category to build the tag
              const category = HABIT_CATEGORIES.find(cat => cat.emoji === g.emoji);
              const tagName = category ? translations[language][category.translationKey] : 'General';
 
@@ -248,7 +311,7 @@ export default function App() {
         setHabitGroups(mappedGroups);
     }
 
-  }, [currentUser, language]);
+  }, [currentUser, language, calculateAndSetUserStats]);
 
   // Fetch user profile and data after session is set
   useEffect(() => {
@@ -556,6 +619,7 @@ export default function App() {
                   onUpdateName={handleUpdateUserName}
                   onDeleteHabit={handleDeleteHabit}
                   onDeleteHabitLog={handleDeleteHabitLog}
+                  userStats={userStats}
                />;
     }
     if (!currentUser) return null; // Or a loading spinner

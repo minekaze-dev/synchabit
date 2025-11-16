@@ -18,9 +18,9 @@ export default function ConfirmationModal({ isOpen, onClose, onGoToLogin, t }: C
           
           <div className="text-5xl mb-4">📧</div>
 
-          <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100">Confirm your email</h2>
+          <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100">{t.confirmYourEmailTitle}</h2>
           <p className="text-slate-500 dark:text-slate-400 mt-2">
-            We've sent a confirmation link to your email address. Please check your inbox (and spam folder!) to complete your registration.
+            {t.confirmYourEmailBody}
           </p>
           
           <div className="mt-6">
@@ -28,7 +28,7 @@ export default function ConfirmationModal({ isOpen, onClose, onGoToLogin, t }: C
               onClick={onGoToLogin}
               className="w-full py-3 rounded-lg bg-brand-teal-600 text-white font-bold hover:bg-brand-teal-700 transition-colors shadow-lg"
             >
-              Back to Login
+              {t.backToLogin}
             </button>
           </div>
         </div>

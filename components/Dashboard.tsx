@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Habit, StreakAchievement, HabitLog } from '../types';
+import { User, Habit, HabitLog } from '../types';
 import Avatar from './Avatar';
 import Icon from './Icon';
 
@@ -17,6 +17,10 @@ interface ProfileProps {
   onUpdateName: (newName: string) => void;
   onDeleteHabit: (habitId: string) => void;
   onDeleteHabitLog: (logId: string) => void;
+  userStats: {
+    checkinConsistency: number;
+    maxStreak: number;
+  };
 }
 
 const ProgressCard: React.FC<{ 
@@ -232,8 +236,8 @@ const HabitCalendar: React.FC<{
 };
 
 
-const InteractionStatsCard: React.FC<{t: any}> = ({t}) => {
-    const percentage = 65;
+const InteractionStatsCard: React.FC<{t: any, consistency: number}> = ({t, consistency}) => {
+    const percentage = consistency;
     const radius = 40;
     const circumference = 2 * Math.PI * radius;
     const offset = circumference - (percentage / 100) * circumference;
@@ -272,30 +276,32 @@ const InteractionStatsCard: React.FC<{t: any}> = ({t}) => {
     );
 };
 
-// FIX: The STREAK_ACHIEVEMENTS constant was previously imported but is not available in `constants.ts`.
-// It's now defined locally within the component. This resolves the import error and allows for translation of achievement names using the `t` prop.
-const AchievementsCard: React.FC<{t: any}> = ({t}) => {
-    const STREAK_ACHIEVEMENTS: StreakAchievement[] = [
-        { id: '1', name: t.streak30Days, days: 30, earned: true },
-        { id: '2', name: t.streak120Days, days: 120, earned: true },
-        { id: '3', name: t.streak180Days, days: 180, earned: false },
-        { id: '4', name: t.streak365Days, days: 365, earned: false },
+const AchievementsCard: React.FC<{ t: any; maxStreak: number }> = ({ t, maxStreak }) => {
+    const achievementsData = [
+        { id: '1', name: t.streak30Days, days: 30 },
+        { id: '2', name: t.streak120Days, days: 120 },
+        { id: '3', name: t.streak180Days, days: 180 },
+        { id: '4', name: t.streak365Days, days: 365 },
     ];
     return (
         <div className="bg-white dark:bg-slate-900/70 p-5 rounded-xl shadow-sm">
             <h3 className="font-bold text-slate-800 dark:text-slate-200 mb-4">{t.badgesAndAchievements}</h3>
             <div className="space-y-3">
-                {STREAK_ACHIEVEMENTS.map(ach => (
-                    <div key={ach.id} className={`flex items-center p-3 rounded-lg ${ach.earned ? 'bg-amber-100 dark:bg-amber-900/40' : 'bg-slate-100 dark:bg-slate-800'}`}>
-                        <span className="text-2xl mr-3">{ach.earned ? '🏆' : '🔒'}</span>
-                        <div className="flex-grow">
-                            <p className={`font-bold ${ach.earned ? 'text-amber-800 dark:text-amber-300' : 'text-slate-600 dark:text-slate-300'}`}>{ach.name}</p>
-                            <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 mt-1">
-                                <div className="bg-amber-400 h-1.5 rounded-full" style={{width: ach.earned ? '100%' : '50%'}}></div>
+                {achievementsData.map(ach => {
+                    const earned = maxStreak >= ach.days;
+                    const progress = ach.days > 0 ? Math.min((maxStreak / ach.days) * 100, 100) : 0;
+                    return (
+                        <div key={ach.id} className={`flex items-center p-3 rounded-lg ${earned ? 'bg-amber-100 dark:bg-amber-900/40' : 'bg-slate-100 dark:bg-slate-800'}`}>
+                            <span className="text-2xl mr-3">{earned ? '🏆' : '🔒'}</span>
+                            <div className="flex-grow">
+                                <p className={`font-bold ${earned ? 'text-amber-800 dark:text-amber-300' : 'text-slate-600 dark:text-slate-300'}`}>{ach.name}</p>
+                                <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 mt-1">
+                                    <div className="bg-amber-400 h-1.5 rounded-full" style={{width: `${progress}%`}}></div>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                ))}
+                    );
+                })}
             </div>
         </div>
     );
@@ -315,6 +321,7 @@ const Profile: React.FC<ProfileProps> = ({
   onUpdateName,
   onDeleteHabit,
   onDeleteHabitLog,
+  userStats
 }) => {
   const isOwnProfile = currentUser.id === viewingUser.id;
   const userHabits = isOwnProfile ? habits : habits.slice(0, 2);
@@ -361,8 +368,8 @@ const Profile: React.FC<ProfileProps> = ({
       </div>
 
       <div className="lg:col-span-1 space-y-6">
-        <InteractionStatsCard t={t} />
-        <AchievementsCard t={t} />
+        <InteractionStatsCard t={t} consistency={userStats.checkinConsistency} />
+        <AchievementsCard t={t} maxStreak={userStats.maxStreak} />
       </div>
     </div>
   );
