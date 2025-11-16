@@ -19,11 +19,11 @@ export const ENCOURAGEMENT_TEMPLATES: string[] = [
 export const PERSONAL_HABIT_ICONS = ['📖', '🏃', '💧', '📝', '🧘', '🎸', '🏋️', '🎨', '💻', '🔍', '🧹', '🚶'];
 
 export const HABIT_CATEGORIES = [
-  { id: 'learning', translationKey: 'categoryLearning' },
-  { id: 'physical_health', translationKey: 'categoryPhysicalHealth' },
-  { id: 'mental_health', translationKey: 'categoryMentalHealth' },
-  { id: 'finance', translationKey: 'categoryFinance' },
-  { id: 'lifestyle', translationKey: 'categoryLifestyle' },
-  { id: 'social', translationKey: 'categorySocial' },
-  { id: 'challenges', translationKey: 'categoryChallenges' },
+  { id: 'learning', translationKey: 'categoryLearning', emoji: '📚' },
+  { id: 'physical_health', translationKey: 'categoryPhysicalHealth', emoji: '💪' },
+  { id: 'mental_health', translationKey: 'categoryMentalHealth', emoji: '🧠' },
+  { id: 'finance', translationKey: 'categoryFinance', emoji: '💰' },
+  { id: 'lifestyle', translationKey: 'categoryLifestyle', emoji: '🎨' },
+  { id: 'social', translationKey: 'categorySocial', emoji: '🤝' },
+  { id: 'challenges', translationKey: 'categoryChallenges', emoji: '🏆' },
 ];

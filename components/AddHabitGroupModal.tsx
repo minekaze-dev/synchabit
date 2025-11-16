@@ -88,9 +88,7 @@ export default function AddHabitGroupModal({ isOpen, onClose, onAddHabitGroup, t
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (name.trim() && description.trim() && category.trim()) {
-      const selectedCategory = HABIT_CATEGORIES.find(c => c.id === category);
-      const categoryName = selectedCategory ? t[selectedCategory.translationKey] : category;
-      onAddHabitGroup({ name, description, category: categoryName, rules, isPrivate, coverImageUrl: imagePreview || undefined });
+      onAddHabitGroup({ name, description, category: category, rules, isPrivate, coverImageUrl: imagePreview || undefined });
       setName('');
       setDescription('');
       setCategory('');

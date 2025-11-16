@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+
+import React, { useState, useEffect, useCallback } from 'react';
 import Sidebar from './components/Header';
 import Feed from './components/Feed';
 import Profile from './components/Dashboard';
@@ -20,6 +21,7 @@ import AuthModal from './components/AuthModal';
 import { supabase } from './supabaseClient';
 import { Session } from '@supabase/supabase-js';
 import ConfirmationModal from './components/ConfirmationModal';
+import { HABIT_CATEGORIES } from './constants';
 
 export type View = 'feed' | 'profile' | 'settings' | 'messages';
 export type Theme = 'light' | 'dark';
@@ -33,6 +35,18 @@ type AuthModalState = {
   isOpen: boolean;
   mode: 'login' | 'register' | 'forgot';
 }
+
+// Helper to map Supabase user profile to our User type
+const mapProfileToUser = (profile: any): User | null => {
+    if (!profile) return null;
+    return {
+        id: profile.id,
+        name: profile.name,
+        avatarUrl: profile.avatar_url,
+        bio: profile.bio,
+        memberSince: new Date(profile.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+    };
+};
 
 const TopBar: React.FC<{ 
   user: User, 
@@ -179,25 +193,78 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  const fetchData = useCallback(async () => {
+    if (!currentUser) return;
+
+    // Fetch personal habits
+    const { data: habitsData, error: habitsError } = await supabase
+        .from('habits')
+        .select('*')
+        .eq('user_id', currentUser.id);
+
+    if (habitsData) {
+        const mappedHabits: Habit[] = habitsData.map((h: any) => ({
+            id: h.id,
+            name: h.name,
+            icon: h.icon,
+            frequency: h.frequency,
+            color: h.color,
+            streak: 0, // Needs calculation
+        }));
+        setHabits(mappedHabits);
+    }
+    
+    // Fetch habit groups
+    const { data: groupsData, error: groupsError } = await supabase
+        .from('habit_groups')
+        .select('*, creator:profiles(*), members:habit_group_members(profiles(*))');
+
+    if (groupsData) {
+        const mappedGroups: HabitGroup[] = groupsData.map((g: any) => {
+             const members = g.members.map((m: any) => mapProfileToUser(m.profiles)).filter(Boolean) as User[];
+             const creator = mapProfileToUser(g.creator);
+             
+             // Find category to build the tag
+             const category = HABIT_CATEGORIES.find(cat => cat.emoji === g.emoji);
+             const tagName = category ? translations[language][category.translationKey] : 'General';
+
+             return {
+                id: g.id,
+                name: g.name,
+                emoji: g.emoji,
+                description: g.description,
+                isPrivate: g.is_private,
+                coverImageUrl: g.cover_image_url,
+                creator: creator!,
+                members: members,
+                memberCount: members.length,
+                tag: {
+                    emoji: g.emoji,
+                    text: tagName
+                }
+             }
+        }).filter(g => g.creator);
+        setHabitGroups(mappedGroups);
+    }
+
+  }, [currentUser, language]);
+
   // Fetch user profile and data after session is set
   useEffect(() => {
-    if (session) {
-      // Fetch user profile
-      supabase.from('profiles').select('*').eq('id', session.user.id).single().then(({data}) => {
+    if (session && !currentUser) {
+      setLoading(true);
+      supabase.from('profiles').select('*').eq('id', session.user.id).single().then(({data, error}) => {
           if (data) {
-              const userProfile: User = {
-                  id: data.id,
-                  name: data.name,
-                  avatarUrl: data.avatar_url,
-                  bio: data.bio,
-                  memberSince: new Date(data.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
-              };
-              setCurrentUser(userProfile);
-              // Fetch other data
+              const userProfile = mapProfileToUser(data);
+              if(userProfile) setCurrentUser(userProfile);
           }
+          if (error) console.error("Error fetching profile:", error);
+          setLoading(false);
       });
+    } else if (currentUser) {
+        fetchData();
     }
-  }, [session]);
+  }, [session, currentUser, fetchData]);
 
 
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false); // Placeholder
@@ -205,14 +272,12 @@ export default function App() {
   const t = translations[language];
   const unreadNotificationCount = notifications.filter(n => !n.isRead).length;
   
-  // These need to be recalculated with real data
-  const myHabitGroupIds: string[] = []; 
+  const myHabitGroupIds: string[] = currentUser ? habitGroups.filter(hg => hg.members.some(m => m.id === currentUser.id)).map(hg => hg.id) : []; 
   const pendingJoinRequestIds: string[] = [];
 
   const handleLogin = async (email: string, pass: string): Promise<string | null> => {
     const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
     if (error) {
-      alert(error.message);
       return error.message;
     }
     setAuthModal({ isOpen: false, mode: 'login' });
@@ -225,13 +290,12 @@ export default function App() {
         password: pass,
         options: {
             data: {
-                name: fullName,
-                avatar_url: `https://i.pravatar.cc/150?u=${email}` // Default avatar
+                full_name: fullName,
+                avatar_url: `https://i.pravatar.cc/150?u=${email}`
             }
         }
     });
      if (error) {
-      alert(error.message);
       return error.message;
     }
     setAuthModal({ isOpen: false, mode: 'register'});
@@ -241,10 +305,9 @@ export default function App() {
 
   const handleForgotPassword = async (email: string): Promise<string | null> => {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: window.location.origin, // URL to redirect to after password reset
+        redirectTo: window.location.origin,
     });
     if (error) {
-        alert(error.message);
         return error.message;
     }
     alert('Password reset link sent! Please check your email.');
@@ -297,13 +360,64 @@ export default function App() {
     }
   };
 
-  const handleAddHabit = (newHabit: Omit<Habit, 'id' | 'streak'>) => {
-    // Supabase logic here
+  const handleAddHabit = async (newHabit: Omit<Habit, 'id' | 'streak'>) => {
+    if (!currentUser) return;
+    const colors = ['purple', 'green', 'blue', 'pink'];
+    const randomColor = colors[Math.floor(Math.random() * colors.length)];
+    
+    const { data, error } = await supabase
+      .from('habits')
+      .insert({
+        user_id: currentUser.id,
+        name: newHabit.name,
+        icon: newHabit.icon,
+        frequency: newHabit.frequency,
+        color: randomColor,
+      })
+      .select()
+      .single();
+
+    if (data) {
+        const addedHabit: Habit = {
+            id: data.id,
+            name: data.name,
+            icon: data.icon,
+            frequency: data.frequency,
+            color: data.color,
+            streak: 0,
+        };
+        setHabits(prev => [...prev, addedHabit]);
+    }
+    if (error) console.error("Error adding habit:", error);
     setIsAddHabitModalOpen(false);
   };
   
-  const handleAddHabitGroup = (data: { name: string, description: string, category: string, rules: string, isPrivate: boolean, coverImageUrl?: string }) => {
-    // Supabase logic here
+  const handleAddHabitGroup = async (data: { name: string, description: string, category: string, rules: string, isPrivate: boolean, coverImageUrl?: string }) => {
+    if (!currentUser) return;
+    const categoryInfo = HABIT_CATEGORIES.find(c => c.id === data.category);
+    if (!categoryInfo) return;
+
+    const fullDescription = data.rules ? `${data.description}\n\n**Rules:**\n${data.rules}` : data.description;
+    
+    const { data: newGroupData, error } = await supabase
+        .from('habit_groups')
+        .insert({
+            name: data.name,
+            description: fullDescription,
+            emoji: categoryInfo.emoji,
+            is_private: data.isPrivate,
+            cover_image_url: data.coverImageUrl,
+            creator_id: currentUser.id
+        })
+        .select()
+        .single();
+    
+    if (newGroupData) {
+        // Instead of manually constructing, we refetch to get all relational data correctly
+        fetchData();
+    }
+    if (error) console.error("Error adding habit group:", error);
+
     setIsAddHabitGroupModalOpen(false);
   };
 
@@ -362,12 +476,40 @@ export default function App() {
     // Supabase logic here
   };
 
-  const handleUpdateAvatar = (newAvatarUrl: string) => {
-    // Supabase logic here
+  const handleUpdateAvatar = async (newAvatarUrl: string) => {
+    if (!currentUser) return;
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({ avatar_url: newAvatarUrl })
+      .eq('id', currentUser.id)
+      .select()
+      .single();
+    
+    if (data) {
+        setCurrentUser(prev => prev ? { ...prev, avatarUrl: data.avatar_url } : null);
+        if (viewingUser?.id === currentUser.id) {
+            setViewingUser(prev => prev ? { ...prev, avatarUrl: data.avatar_url } : null);
+        }
+    }
+    if (error) console.error("Error updating avatar:", error);
   };
   
-  const handleUpdateUserName = (newName: string) => {
-    // Supabase logic here
+  const handleUpdateUserName = async (newName: string) => {
+    if (!currentUser) return;
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({ name: newName })
+      .eq('id', currentUser.id)
+      .select()
+      .single();
+      
+    if (data) {
+        setCurrentUser(prev => prev ? { ...prev, name: data.name } : null);
+        if (viewingUser?.id === currentUser.id) {
+            setViewingUser(prev => prev ? { ...prev, name: data.name } : null);
+        }
+    }
+    if (error) console.error("Error updating name:", error);
   };
 
   const handleDeleteHabit = (habitId: string) => {
@@ -431,7 +573,7 @@ export default function App() {
   if (loading) {
     return (
         <div className="min-h-screen font-sans flex items-center justify-center bg-slate-50 dark:bg-slate-950">
-            <p>Loading...</p>
+            <p className="text-slate-500 dark:text-slate-400">Loading...</p>
         </div>
     );
   }
@@ -471,7 +613,7 @@ export default function App() {
   if (!currentUser) {
      return (
         <div className="min-h-screen font-sans flex items-center justify-center bg-slate-50 dark:bg-slate-950">
-            <p>Loading user profile...</p>
+            <p className="text-slate-500 dark:text-slate-400">Loading user profile...</p>
         </div>
     );
   }
@@ -482,7 +624,7 @@ export default function App() {
         <Sidebar 
             currentView={currentView}
             setCurrentView={setCurrentView} 
-            habitGroups={habitGroups}
+            habitGroups={habitGroups.filter(hg => myHabitGroupIds.includes(hg.id))}
             onOpenAddHabitGroupModal={() => setIsAddHabitGroupModalOpen(true)}
             t={t}
             selectedHabitGroupId={selectedHabitGroupId}
